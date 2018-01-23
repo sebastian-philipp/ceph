@@ -112,6 +112,7 @@ BuildRequires:	python-Werkzeug
 BuildRequires:	python-numpy-devel
 %endif
 BuildRequires:	python-pecan
+BuildRequires:	python-bcrypt
 BuildRequires:	socat
 %endif
 BuildRequires:	bc
@@ -343,6 +344,7 @@ Requires:       python-pyOpenSSL
 Recommends:     python-influxdb
 %endif
 Requires:       python-pecan
+Requires:       python-bcrypt
 %description mgr
 ceph-mgr enables python modules that provide services (such as the REST
 module derived from Calamari) and expose CLI hooks.  ceph-mgr gathers
