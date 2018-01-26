@@ -39,7 +39,7 @@ class Module(MgrModule):
         }
     ]
 
-    def serve(self):
+    def configure_cherrypy(self, in_unittest=False):
         server_addr = self.get_localized_config('server_addr', '::')
         server_port = self.get_localized_config('server_port', '8080')
         if server_addr is None:
@@ -50,10 +50,11 @@ class Module(MgrModule):
         self.log.info("server_addr: %s server_port: %s", server_addr,
                       server_port)
 
-        cherrypy.config.update({
-            'server.socket_host': server_addr,
-            'server.socket_port': int(server_port),
-        })
+        if not in_unittest:
+            cherrypy.config.update({
+                'server.socket_host': server_addr,
+                'server.socket_port': int(server_port),
+            })
         cherrypy.tools.autenticate = cherrypy.Tool('before_handler',
                                                    Auth.check_auth)
 
@@ -69,6 +70,10 @@ class Module(MgrModule):
 
         cherrypy.tree.mount(Module.ApiRoot(self), "/api")
         cherrypy.tree.mount(Module.StaticRoot(), '/', config=config)
+
+    def serve(self):
+        self.configure_cherrypy()
+
         cherrypy.engine.start()
         self.log.info("Waiting for engine...")
         cherrypy.engine.block()
@@ -81,9 +86,7 @@ class Module(MgrModule):
 
     def handle_command(self, cmd):
         if cmd['prefix'] == 'dashboard set-login-credentials':
-            self.set_localized_config('username', cmd['username'])
-            hashed_passwd = Auth.password_hash(cmd['password'])
-            self.set_localized_config('password', hashed_passwd)
+            Auth.set_login_credentials(cmd['username'], cmd['password'])
             return 0, 'Username and password updated', ''
 
         return (-errno.EINVAL, '', 'Command not found \'{0}\''
@@ -94,7 +97,7 @@ class Module(MgrModule):
             ctrls = load_controllers(mgrmod)
             mgrmod.log.debug("loaded controllers: {}".format(ctrls))
             for ctrl in ctrls:
-                mgrmod.log.warn("adding controller: {} -> {}"
+                mgrmod.log.info("adding controller: {} -> /api/{}"
                                 .format(ctrl.__name__, ctrl._cp_path_))
                 ins = ctrl()
                 setattr(Module.ApiRoot, ctrl._cp_path_, ins)
