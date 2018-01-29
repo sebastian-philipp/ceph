@@ -56,7 +56,7 @@ class Module(MgrModule):
                 'server.socket_port': int(server_port),
             })
         cherrypy.tools.authenticate = cherrypy.Tool('before_handler',
-                                                   Auth.check_auth)
+                                                    Auth.check_auth)
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         fe_dir = os.path.join(current_dir, 'frontend/dist')
