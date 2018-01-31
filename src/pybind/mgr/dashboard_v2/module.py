@@ -22,7 +22,7 @@ if 'COVERAGE_ENABLED' in os.environ:
 # pylint: disable=wrong-import-position
 from .controllers.auth import Auth
 from .tools import load_controllers, json_error_page, SessionExpireAtBrowserCloseTool, \
-                   NotificationQueue
+                   NotificationQueue, cached_property
 from .settings import Settings, options_command_list, handle_option_command
 from . import logger
 
@@ -145,6 +145,17 @@ class Module(MgrModule):
         NotificationQueue.stop()
         cherrypy.engine.exit()
         logger.info('Stopped server')
+
+    @cached_property
+    def rados(self):
+        """
+        A librados instance to be shared by any classes within
+        this mgr module that want one.
+        """
+        import rados
+        rados = rados.Rados(context=self.get_context())
+        rados.connect()
+        return rados
 
     def handle_command(self, cmd):
         res = handle_option_command(cmd)
