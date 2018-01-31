@@ -6,6 +6,7 @@ import itertools
 import operator
 import copy
 
+import datetime
 from six import add_metaclass
 from six.moves import reduce
 
@@ -103,10 +104,6 @@ class Field(object):
             setattr(cls, 'get_%s_display' % self.name,
                     partial(cls._get_FIELD_display, field=self))
 
-    def _get_FIELD_display(self, field):
-        value = getattr(self, field.attname)
-        return str(dict(field.flatchoices).get(value, value))
-
     def get_default(self):
         return self.default if self.has_default() else None
 
@@ -170,6 +167,13 @@ class BooleanField(JsonField):
 class FloatField(JsonField):
     def __init__(self, **kwargs):
         super(FloatField, self).__init__(base_type=float, **kwargs)
+
+
+class DateTimeField(JsonField):
+    def __init__(self, auto_now_add=False, auto_now=False, **kwargs):
+        super(DateTimeField, self).__init__(base_type=datetime.datetime, **kwargs)
+        self.auto_now_add = auto_now_add
+        self.auto_now = auto_now
 
 
 class NoDbQuery(object):
@@ -887,6 +891,10 @@ class NodbModel(object):
     @pk.setter
     def pk(self, value):
         setattr(self, self._meta.pk.attname, value)
+
+    def _get_FIELD_display(self, field):
+        value = getattr(self, field.attname)
+        return str(dict(field.flatchoices).get(value, value))
 
     def __eq__(self, other):
         return isinstance(other, self.__class__) and self.pk == other.pk
