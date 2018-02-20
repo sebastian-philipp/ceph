@@ -252,13 +252,8 @@ class RESTController(BaseController):
 
     """
 
-    def _not_implemented(self, obj_key, detail_route_name):
-        if detail_route_name:
-            try:
-                methods = getattr(getattr(self, detail_route_name), 'detail_route_methods')
-            except AttributeError:
-                raise cherrypy.NotFound()
-        else:
+    def _not_implemented(self, obj_key, methods=None):
+        if methods is None:
             methods = [method
                        for ((method, _is_element), (meth, _))
                        in self._method_mapping.items()
@@ -278,23 +273,35 @@ class RESTController(BaseController):
         ('DELETE', True): ('delete', 204),
     }
 
+    def _check_method(self, obj_key, method_name):
+        try:
+            method = getattr(self, method_name)
+            if getattr(method, 'detail_route', False):
+                methods = getattr(method, 'detail_route_methods')
+                if cherrypy.request.method not in methods:
+                    self._not_implemented(obj_key, methods)
+                return method, 200
+            elif getattr(method, 'list_route', False):
+                methods = getattr(method, 'list_route_methods')
+                if cherrypy.request.method not in methods:
+                    self._not_implemented(obj_key, methods)
+                return method, 200
+        except AttributeError:
+            self._not_implemented(obj_key)
+
     def _get_method(self, obj_key, detail_route_name):
         if detail_route_name:
-            try:
-                method = getattr(self, detail_route_name)
-                if not getattr(method, 'detail_route'):
-                    self._not_implemented(obj_key, detail_route_name)
-                if cherrypy.request.method not in getattr(method, 'detail_route_methods'):
-                    self._not_implemented(obj_key, detail_route_name)
-                return method, 200
-            except AttributeError:
-                self._not_implemented(obj_key, detail_route_name)
+            return self._check_method(obj_key, detail_route_name)
+        elif isinstance(obj_key, str) and \
+            hasattr(self, obj_key) and \
+            getattr(getattr(self, obj_key), 'list_route', False):
+            return self._check_method(obj_key, obj_key)
         else:
             method_name, status_code = self._method_mapping[
                 (cherrypy.request.method, obj_key is not None)]
             method = getattr(self, method_name, None)
             if not method:
-                self._not_implemented(obj_key, detail_route_name)
+                self._not_implemented(obj_key)
             return method, status_code
 
     @cherrypy.expose
@@ -304,6 +311,8 @@ class RESTController(BaseController):
         obj_key, detail_route_name = self.split_vpath(vpath)
         method, status_code = self._get_method(obj_key, detail_route_name)
 
+        obj_key_args = [obj_key] if obj_key and not getattr(method, 'list_route', False) else []
+
         if cherrypy.request.method not in ['GET', 'DELETE']:
             method = RESTController._takes_json(method)
 
@@ -312,7 +321,6 @@ class RESTController(BaseController):
 
         cherrypy.response.status = status_code
 
-        obj_key_args = [obj_key] if obj_key else []
         return method(*obj_key_args, **params)
 
     @staticmethod
@@ -407,6 +415,14 @@ def detail_route(methods):
     def decorator(func):
         func.detail_route = True
         func.detail_route_methods = [m.upper() for m in methods]
+        return func
+    return decorator
+
+
+def list_route(methods):
+    def decorator(func):
+        func.list_route = True
+        func.list_route_methods = [m.upper() for m in methods]
         return func
     return decorator
 

@@ -1,4 +1,114 @@
-from dashboard_v2.tests.helper import ControllerTestCase, authenticate
+from cherrypy.test.helper import CPWebCase
+import cherrypy
+import mock
+import json
+
+from ..controllers.auth import Auth
+from ..tools import SessionExpireAtBrowserCloseTool
+from ..controllers.rbd_mirroring import RbdMirroring
+from .helper import ControllerTestCase, authenticate
+
+# DaemonsAndPools.get_daemons
+
+#self._module.list_servers()
+
+mock_list_servers = [
+    {
+        'services': [
+            {
+                'type': 'rbd-mirror',
+                'id': 42
+            }
+        ],
+        'hostname': 'localhost',
+    },
+]
+
+# self._module.get_metadata('rbd-mirror', id)
+
+mock_get_metadata = {
+    'instance_id': 42,
+    'id': 1,
+    'ceph_version': 'mimic',
+}
+
+# self._module.get_daemon_status('rbd-mirror', id)
+
+_status = {
+    1: {
+        "callouts": {},
+        "image_local_count": 44,
+        "image_remote_count": 45,
+        "image_error_count": 46,
+        "image_warning_count": 47,
+        'name': 'ehh',
+    }
+}
+
+mock_get_daemon_status = {
+    'json': json.dumps(_status)
+}
+
+mock_osd_map = {
+    'pools': [
+        {
+            'pool_name': 'rbd',
+            'application_metadata': {'rbd'}
+        }
+    ]
+}
+
+
+#def get_pools(self, daemons):  # aus zeile 35
+#    status, pool_names = self._module.rbd_pool_ls.get()
+
+
+#mock_rbd_pool_ls = (
+#    None,
+#    ["pool1", "pool2", "pool3"]
+#)
+
+# test_rbd_mirroring.py:
+
+
+#mock_rbd_pool_ls = (None, ['pool1'])
+
+
+class RbdMirroringControllerTest(ControllerTestCase, CPWebCase):
+
+    @classmethod
+    def setup_server(cls):
+        # Initialize custom handlers.
+        cherrypy.tools.authenticate = cherrypy.Tool('before_handler', Auth.check_auth)
+        cherrypy.tools.session_expire_at_browser_close = SessionExpireAtBrowserCloseTool()
+
+        cls._mgr_module = mock.Mock()
+        cls.setup_test()
+
+    @classmethod
+    def setup_test(cls):
+        mgr_mock = mock.Mock()
+        mgr_mock.list_servers.return_value = mock_list_servers
+        mgr_mock.get_metadata.return_value = mock_get_metadata
+        mgr_mock.get_daemon_status.return_value = mock_get_daemon_status
+        mgr_mock.get.return_value = mock_osd_map
+        mgr_mock.url_prefix = ''
+
+        RbdMirroring.mgr = mgr_mock
+        RbdMirroring._cp_config['tools.authenticate.on'] = False  # pylint: disable=protected-access
+
+        cherrypy.tree.mount(RbdMirroring(), "/api/test/rbdmirroring")
+
+    def __init__(self, *args, **kwargs):
+        super(RbdMirroringControllerTest, self).__init__(*args, dashboard_port=54583, **kwargs)
+
+    @mock.patch('dashboard_v2.controllers.rbd_mirroring.rbd')
+    def test_list(self, rbd_mock):
+        #rbd_mock.RBD
+        self._post("/api/auth", {'username': 'admin', 'password': 'admin'})
+        self._get('/api/test/rbdmirroring')
+        self.assertStatus(200)
+        self.assertJsonBody({'errors': 0, 'warnings': 1})
 
 
 class RbdMirrorApiTest(ControllerTestCase):

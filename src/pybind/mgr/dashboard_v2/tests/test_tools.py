@@ -8,7 +8,7 @@ from cherrypy.lib.sessions import RamSession
 from cherrypy.test import helper
 from mock import patch
 
-from ..tools import RESTController, detail_route
+from ..tools import RESTController, detail_route, list_route
 
 
 # pylint: disable=W0613
@@ -38,6 +38,10 @@ class FooResource(RESTController):
     @detail_route(methods=['get'])
     def detail(self, key):
         return {'detail': key}
+
+    @list_route(methods=['PUT'])
+    def special_create(self, data):
+        return data
 
 
 class FooArgs(RESTController):
@@ -130,4 +134,11 @@ class RESTControllerTest(helper.CPWebCase):
         self.assertJsonBody({'detail': '1'})
 
         self._post('/foo/1/detail', 'post-data')
+        self.assertStatus(405)
+
+    def test_list_route(self):
+        self._put('/foo/special_create', {'a':'b'})
+        self.assertJsonBody({'a':'b'})
+
+        self._post('/foo/special_create', 'post-data')
         self.assertStatus(405)
