@@ -37,13 +37,7 @@ class RgwDaemon(RESTController):
                     daemon = {
                         'id': service['id'],
                         'version': metadata['ceph_version'],
-                        'server_hostname': server['hostname'],
-                        'service': service,
-                        'server': server,
-                        'metadata': metadata,
-                        'status': status,
-                        'url': "{0}/api/rgw/daemon/{1}".format(
-                            self.mgr.url_prefix, service['id'])
+                        'server_hostname': server['hostname']
                     }
 
                     daemons.append(daemon)

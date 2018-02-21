@@ -16,20 +16,12 @@ class RgwControllerTest(ControllerTestCase):
         self.assertIn('id', data)
         self.assertIn('version', data)
         self.assertIn('server_hostname', data)
-        self.assertIn('service', data)
-        self.assertIn('server', data)
-        self.assertIn('metadata', data)
-        self.assertIn('status', data)
-        self.assertIn('url', data)
-        self.assertIn('zone_name', data['metadata'])
-        self.assertEqual('rgw', data['service']['type'])
-        self.assertEqual('/api/rgw/daemon/{}'.format(data['id']), data['url'])
 
     @authenticate
     def test_rgw_daemon_get(self):
         data = self._get('/api/rgw/daemon')
         self.assertStatus(200)
-        data = self._get(data[0]['url'])
+        data = self._get('/api/rgw/daemon/{}'.format(data[0]['id']))
         self.assertStatus(200)
 
         self.assertIn('rgw_metadata', data)
