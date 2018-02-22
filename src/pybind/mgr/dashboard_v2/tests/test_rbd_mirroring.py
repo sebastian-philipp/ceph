@@ -57,6 +57,9 @@ class RbdMirroringControllerTest(ControllerTestCase, CPWebCase):
 
     @classmethod
     def setup_test(cls):
+        cls.mock_rbd = mock.patch('dashboard_v2.controllers.rbd_mirroring.rbd')
+        cls.mock_rbd.start()
+
         mgr_mock = mock.Mock()
         mgr_mock.list_servers.return_value = mock_list_servers
         mgr_mock.get_metadata.return_value = mock_get_metadata
@@ -70,11 +73,14 @@ class RbdMirroringControllerTest(ControllerTestCase, CPWebCase):
         cherrypy.tree.mount(RbdMirror(), '/api/test/rbdmirror')
         cherrypy.tree.mount(RbdMirror().toplevel(), '/api/test/rbdmirror/toplevel')
 
+    @classmethod
+    def tearDownClass(cls):
+        cls.mock_rbd.stop()
+
     def __init__(self, *args, **kwargs):
         super(RbdMirroringControllerTest, self).__init__(*args, dashboard_port=54583, **kwargs)
 
-    @mock.patch('dashboard_v2.controllers.rbd_mirroring.rbd')
-    def test_default(self, rbd_mock):  # pylint: disable=W0613
+    def test_default(self):
         self._get('/api/test/rbdmirror')
         self.assertStatus(200)
         self.assertJsonBody({'status': 0, 'content_data': {
@@ -106,8 +112,7 @@ class RbdMirroringControllerTest(ControllerTestCase, CPWebCase):
             'image_ready': []},
         })
 
-    @mock.patch('dashboard_v2.controllers.rbd_mirroring.rbd')
-    def test_toplevel(self, rbd_mock):  # pylint: disable=W0613
+    def test_toplevel(self):
         self._get('/api/test/rbdmirror/toplevel')
         self.assertStatus(200)
         self.assertJsonBody({'errors': 0, 'warnings': 0})
