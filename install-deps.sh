@@ -119,9 +119,9 @@ function ensure_min_npm_version {
     UPDATE_NODE=true
   fi
   if $UPDATE_NODE; then
-    npm install -g n
-    n 4.8.0  # installs nodejs version 4.8.0
-    npm uninstall -g n
+    $SUDO npm install -g n
+    $SUDO n 4.8.0  # installs nodejs version 4.8.0
+    $SUDO npm uninstall -g n
     hash -d node > /dev/null 2>&1 || true
   fi
 
