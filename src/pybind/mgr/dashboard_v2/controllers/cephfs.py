@@ -2,10 +2,10 @@
 from __future__ import absolute_import
 
 from collections import defaultdict
-import json
 
 import cherrypy
-from mgr_module import CommandResult
+
+from ..services.ceph_service import CephService
 
 from .. import mgr
 from ..tools import ApiController, AuthRequired, BaseController, ViewCache
@@ -256,11 +256,11 @@ class CephFS(BaseController):
     def _clients(self, fs_id):
         cephfs_clients = self.cephfs_clients.get(fs_id, None)
         if cephfs_clients is None:
-            cephfs_clients = CephFSClients(mgr, fs_id)
+            cephfs_clients = lambda: self.ceph_fs_clients(fs_id)
             self.cephfs_clients[fs_id] = cephfs_clients
 
         try:
-            status, clients = cephfs_clients.get()
+            status, clients = cephfs_clients()
         except AttributeError:
             raise cherrypy.HTTPError(404,
                                      "No cephfs with id {0}".format(fs_id))
@@ -296,23 +296,7 @@ class CephFS(BaseController):
             return data[-1][1]
         return 0
 
-
-class CephFSClients(object):
-    def __init__(self, module_inst, fscid):
-        self._module = module_inst
-        self.fscid = fscid
-
-    # pylint: disable=unused-variable
-    @ViewCache()
-    def get(self):
-        mds_spec = "{0}:0".format(self.fscid)
-        result = CommandResult("")
-        self._module.send_command(result, "mds", mds_spec,
-                                  json.dumps({
-                                      "prefix": "session ls",
-                                  }),
-                                  "")
-        r, outb, outs = result.wait()
+    @ViewCache
+    def ceph_fs_clients(self, fscid):
         # TODO handle nonzero returns, e.g. when rank isn't active
-        assert r == 0
-        return json.loads(outb)
+        return CephService.send_command('mds', 'session ls', srv_spec='{0}:0'.format(fscid))

@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
-from .. import mgr
+import json
 
+from .. import mgr
+from mgr_module import CommandResult
+from .. import logger
 
 class CephService(object):
     @classmethod
@@ -58,3 +61,39 @@ class CephService(object):
             return osd_map['pools']
         return [pool for pool in osd_map['pools']
                 if application in pool.get('application_metadata', {})]
+
+    @classmethod
+    def send_command(cls, srv_type, prefix, srv_spec='', **kwargs):
+        """
+        :type prefix: str
+        :param srv_type: mon |
+        :param kwargs: will be added to argdict
+        :param srv_spec: typically empty. or something like "<fs_id>:0"
+
+        :raises PermissionError: See rados.make_ex
+        :raises ObjectNotFound: See rados.make_ex
+        :raises IOError: See rados.make_ex
+        :raises NoSpace: See rados.make_ex
+        :raises ObjectExists: See rados.make_ex
+        :raises ObjectBusy: See rados.make_ex
+        :raises NoData: See rados.make_ex
+        :raises InterruptedOrTimeoutError: See rados.make_ex
+        :raises TimedOut: See rados.make_ex
+        :raises ValueError: return code != 0
+        """
+        argdict = {
+            "prefix": prefix,
+            "format": "json",
+        }
+        argdict.update(kwargs)
+
+        result = CommandResult("")
+        cls.mgr.send_command(result, srv_type, srv_spec, json.dumps(argdict), "")
+        r, outb, outs = result.wait()
+        if r != 0:
+            # Oh well. We won't let this stop us though.
+            msg = "send_command '{}' failed. (r={}, \"{}\")".format(prefix, r, outs)
+            logger.error(msg)
+            raise ValueError(msg)
+        else:
+            return json.loads(outb)
