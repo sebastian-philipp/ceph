@@ -62,10 +62,11 @@ download_boost() {
 }
 
 build_dashboard_frontend() {
-  pushd src/pybind/mgr/dashboard_v2/frontend
+  CURR_DIR=`pwd`
+  cd src/pybind/mgr/dashboard_v2/frontend
   npm install
   npm run build -- --prod
-  popd
+  cd $CURR_DIR
   tar cf dashboard_frontend.tar $outfile/src/pybind/mgr/dashboard_v2/frontend/dist
 }
 
