@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, TemplateRef, ViewChild } from '@angular/core';
 
 import { CellTemplate } from '../../../../shared/enum/cell-template.enum';
 import { CdTableColumn } from '../../../../shared/models/cd-table-column';
@@ -11,7 +11,8 @@ import { OsdService } from '../osd.service';
   styleUrls: ['./osd-list.component.scss']
 })
 
-export class OsdListComponent {
+export class OsdListComponent implements OnInit {
+  @ViewChild('statusColor') statusColor: TemplateRef<any>;
   osds = [];
   detailsComponent = 'OsdDetailsComponent';
   columns: CdTableColumn[];
@@ -19,11 +20,13 @@ export class OsdListComponent {
   constructor(
     private osdService: OsdService,
     private dimlessPipe: DimlessPipe
-  ) {
+  ) { }
+
+  ngOnInit() {
     this.columns = [
       {prop: 'host.name', name: 'Host'},
       {prop: 'id', name: 'ID', cellTransformation: CellTemplate.bold},
-      {prop: 'state', name: 'Status'},
+      {prop: 'collectedStates', name: 'Status', cellTemplate: this.statusColor},
       {prop: 'stats.numpg', name: 'PGs'},
       {prop: 'usedPercent', name: 'Usage'},
       {
@@ -45,6 +48,7 @@ export class OsdListComponent {
     this.osdService.getList().subscribe((data: any[]) => {
       this.osds = data;
       data.map((osd) => {
+        osd.collectedStates = this.collectStates(osd);
         osd.stats_history.out_bytes = osd.stats_history.op_out_bytes.map(i => i[1]);
         osd.stats_history.in_bytes = osd.stats_history.op_in_bytes.map(i => i[1]);
         osd.usedPercent = this.dimlessPipe.transform(osd.stats.stat_bytes_used) + ' / ' +
@@ -52,5 +56,10 @@ export class OsdListComponent {
         return osd;
       });
     });
+  }
+
+  collectStates(osd) {
+    const select = (onState, offState) => osd[onState] ? onState : offState;
+    return [select('up', 'down'), select('in', 'out')]
   }
 }
