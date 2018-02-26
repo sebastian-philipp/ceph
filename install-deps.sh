@@ -119,9 +119,9 @@ function ensure_min_npm_version {
     UPDATE_NODE=true
   fi
   if $UPDATE_NODE; then
-    npm install -g n
-    n 4.8.0  # installs nodejs version 4.8.0
-    npm uninstall -g n
+    $SUDO npm install -g n
+    $SUDO n 4.8.0  # installs nodejs version 4.8.0
+    $SUDO npm uninstall -g n
     hash -d node > /dev/null 2>&1 || true
   fi
 
@@ -134,7 +134,7 @@ function ensure_min_npm_version {
     $SUDO npm install -g yarn
     $SUDO yarn global add npm@^5.0.0  # install npm version 5.0.0 or later
   fi
-  hash -d npm > /dev/null 2>&1
+  hash -d npm > /dev/null 2>&1 || true
 
   NEW_NODE_VER=`node -v`
   NEW_NPM_VER=`npm -v`
