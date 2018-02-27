@@ -7,10 +7,15 @@ from __future__ import absolute_import
 import errno
 import os
 import socket
+import tempfile
+from uuid import uuid4
+
 try:
     from urlparse import urljoin
 except ImportError:
     from urllib.parse import urljoin
+
+from OpenSSL import crypto
 import cherrypy
 from mgr_module import MgrModule, MgrStandbyModule
 
@@ -36,12 +41,70 @@ def os_exit_noop(*args):
 os._exit = os_exit_noop
 
 
-def prepare_url_prefix(url_prefix):
-    """
-    return '' if no prefix, or '/prefix' without slash in the end.
-    """
-    url_prefix = urljoin('/', url_prefix)
-    return url_prefix.rstrip('/')
+def configure_cherrypy(default_port, module):
+    def prepare_url_prefix(url_prefix):
+        """
+        :return: '' if no prefix, or '/prefix' without slash in the end.
+        """
+        url_prefix = urljoin('/', url_prefix)
+        return url_prefix.rstrip('/')
+
+    server_addr = module.get_localized_config('server_addr', '::')
+    server_port = module.get_localized_config('server_port', str(default_port))
+    if server_addr is None:
+        raise RuntimeError(
+            'no server_addr configured; '
+            'try "ceph config-key put mgr/{}/{}/server_addr <ip>"'
+                .format(module.module_name, module.get_mgr_id()))
+    module.log.info('server_addr: %s server_port: %s', server_addr,
+                    server_port)
+
+    url_prefix = prepare_url_prefix(module.get_config('url_prefix',
+                                                             default=''))
+
+    # SSL initialization
+
+    cert = module.get_config("crt")
+    if cert is not None:
+        module.cert_tmp = tempfile.NamedTemporaryFile()
+        module.cert_tmp.write(cert.encode('utf-8'))
+        module.cert_tmp.flush()  # cert_tmp must not be gc'ed
+        cert_fname = module.cert_tmp.name
+    else:
+        cert_fname = module.get_localized_config('crt_file')
+
+    pkey = module.get_config("key")
+    if pkey is not None:
+        module.pkey_tmp = tempfile.NamedTemporaryFile()
+        module.pkey_tmp.write(pkey.encode('utf-8'))
+        module.pkey_tmp.flush()  # pkey_tmp must not be gc'ed
+        pkey_fname = module.pkey_tmp.name
+    else:
+        pkey_fname = module.get_localized_config('key_file')
+
+    if not cert_fname or not pkey_fname:
+        logger.warning('{}, {}, {}, {}'.format(cert, pkey, cert_fname, pkey_fname))
+        raise RuntimeError('no certificate configured')
+    if not os.path.isfile(cert_fname):
+        raise RuntimeError('certificate %s does not exist' % cert_fname)
+    if not os.path.isfile(pkey_fname):
+        raise RuntimeError('private key %s does not exist' % pkey_fname)
+
+    # Apply the 'global' CherryPy configuration.
+    config = {
+        'engine.autoreload.on': False,
+        'server.socket_host': server_addr,
+        'server.socket_port': int(server_port),
+        'error_page.default': json_error_page,
+
+        'server.ssl_module': 'builtin',
+        #'server.ssl_module': 'pyopenssl',
+        'server.ssl_certificate': cert_fname,
+        'server.ssl_private_key': pkey_fname
+    }
+    cherrypy.config.update(config)
+
+    return server_addr, server_port, url_prefix
 
 
 class Module(MgrModule):
@@ -62,44 +125,27 @@ class Module(MgrModule):
                    'name=seconds,type=CephInt',
             'desc': 'Set the session expire timeout',
             'perm': 'w'
-        }
+        },
+        {
+            "cmd": "dashboard create-self-signed-cert",
+            "desc": "Create self signed certificate",
+            "perm": "w"
+        },
     ]
-
-    @property
-    def url_prefix(self):
-        return self._url_prefix
 
     def __init__(self, *args, **kwargs):
         super(Module, self).__init__(*args, **kwargs)
         mgr.init(self)
-        self._url_prefix = ''
+        self.url_prefix = ''
 
-    def configure_cherrypy(self):
-        server_addr = self.get_localized_config('server_addr', '::')
-        server_port = self.get_localized_config('server_port', '8080')
-        if server_addr is None:
-            raise RuntimeError(
-                'no server_addr configured; '
-                'try "ceph config-key put mgr/{}/{}/server_addr <ip>"'
-                .format(self.module_name, self.get_mgr_id()))
-        self.log.info('server_addr: %s server_port: %s', server_addr,
-                      server_port)
+    def _serve(self):
+        server_addr, server_port, self.url_prefix = configure_cherrypy(8080, self)
 
-        self._url_prefix = prepare_url_prefix(self.get_config('url_prefix',
-                                                              default=''))
+        logger.warning('server_addr, server_port, self.url_prefix: {}, {}, {}'.format(server_addr, server_port, self.url_prefix))
 
         # Initialize custom handlers.
         cherrypy.tools.authenticate = cherrypy.Tool('before_handler', Auth.check_auth)
         cherrypy.tools.session_expire_at_browser_close = SessionExpireAtBrowserCloseTool()
-
-        # Apply the 'global' CherryPy configuration.
-        config = {
-            'engine.autoreload.on': False,
-            'server.socket_host': server_addr,
-            'server.socket_port': int(server_port),
-            'error_page.default': json_error_page
-        }
-        cherrypy.config.update(config)
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         fe_dir = os.path.join(current_dir, 'frontend/dist')
@@ -125,12 +171,22 @@ class Module(MgrModule):
     def serve(self):
         if 'COVERAGE_ENABLED' in os.environ:
             _cov.start()
-        self.configure_cherrypy()
-
-        cherrypy.engine.start()
         NotificationQueue.start_queue()
-        logger.info('Waiting for engine...')
-        cherrypy.engine.block()
+
+        while True:
+            try:
+                self._serve()
+
+                cherrypy.engine.start()
+                logger.info('Waiting for engine...')
+                cherrypy.engine.block()
+                break
+            except RuntimeError:
+                self.log.exception('Cannot server')
+                import time
+                time.sleep(5)
+
+
         if 'COVERAGE_ENABLED' in os.environ:
             _cov.stop()
             _cov.save()
@@ -145,14 +201,43 @@ class Module(MgrModule):
 
     def handle_command(self, cmd):
         if cmd['prefix'] == 'dashboard set-login-credentials':
+            Auth.mgr = self
             Auth.set_login_credentials(cmd['username'], cmd['password'])
             return 0, 'Username and password updated', ''
         elif cmd['prefix'] == 'dashboard set-session-expire':
             self.set_config('session-expire', str(cmd['seconds']))
             return 0, 'Session expiration timeout updated', ''
+        elif cmd['prefix'] == 'dashboard create-self-signed-cert':
+            self.create_self_signed_cert()
+            return 0, 'Self-signed Certificate created', ''
 
         return (-errno.EINVAL, '', 'Command not found \'{0}\''
                 .format(cmd['prefix']))
+
+    def create_self_signed_cert(self):
+        try:
+            # create a key pair
+            pkey = crypto.PKey()
+            pkey.generate_key(crypto.TYPE_RSA, 2048)
+
+            # create a self-signed cert
+            cert = crypto.X509()
+            cert.get_subject().O = "IT"
+            cert.get_subject().CN = "ceph-dashboard"
+            cert.set_serial_number(int(uuid4()))
+            cert.gmtime_adj_notBefore(0)
+            cert.gmtime_adj_notAfter(10*365*24*60*60)
+            cert.set_issuer(cert.get_subject())
+            cert.set_pubkey(pkey)
+            cert.sign(pkey, 'sha512')
+
+            cert = crypto.dump_certificate(crypto.FILETYPE_PEM, cert)
+            self.set_config('crt', cert.decode('utf-8'))
+
+            pkey = crypto.dump_privatekey(crypto.FILETYPE_PEM, pkey)
+            self.set_config('key', pkey.decode('utf-8'))
+        except Exception:
+            logger.exception('huh?')
 
     def notify(self, notify_type, notify_id):
         NotificationQueue.new_notification(notify_type, notify_id)
@@ -208,20 +293,12 @@ class Module(MgrModule):
 
 
 class StandbyModule(MgrStandbyModule):
+    def __init__(self, *args, **kwargs):
+        super(StandbyModule, self).__init__(*args, **kwargs)
+        self.url_prefix = ''
+
     def serve(self):
-        server_addr = self.get_localized_config('server_addr', '::')
-        server_port = self.get_localized_config('server_port', '7000')
-        if server_addr is None:
-            msg = 'no server_addr configured; try "ceph config-key set ' \
-                  'mgr/dashboard/server_addr <ip>"'
-            raise RuntimeError(msg)
-        self.log.info("server_addr: %s server_port: %s",
-                      server_addr, server_port)
-        cherrypy.config.update({
-            'server.socket_host': server_addr,
-            'server.socket_port': int(server_port),
-            'engine.autoreload.on': False
-        })
+        _, _, url_prefix = configure_cherrypy(7000, self)
 
         module = self
 
@@ -251,8 +328,6 @@ class StandbyModule(MgrStandbyModule):
                     """
                     return template.format(delay=5)
 
-        url_prefix = prepare_url_prefix(self.get_config('url_prefix',
-                                                        default=''))
         cherrypy.tree.mount(Root(), "{}/".format(url_prefix), {})
         self.log.info("Starting engine...")
         cherrypy.engine.start()

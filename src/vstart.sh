@@ -665,12 +665,12 @@ EOF
         fi
 	MGR_PORT=$(($MGR_PORT + 1000))
 
-        # dashboard_v2
+
 	ceph_adm config-key set mgr/dashboard_v2/$name/server_port $MGR_PORT
         if [ $mgr -eq 1 ]; then
-            DASH_V2_URLS="http://$IP:$MGR_PORT"
+            DASH_V2_URLS="https://$IP:$MGR_PORT"
         else
-            DASH_V2_URLS+=", http://$IP:$MGR_PORT"
+            DASH_V2_URLS+=", https://$IP:$MGR_PORT"
         fi
 	MGR_PORT=$(($MGR_PORT + 1000))
 
@@ -695,6 +695,9 @@ EOF
     ceph_adm mgr module enable dashboard_v2
     # setting login credentials for dashboard_v2
     ceph_adm tell mgr dashboard set-login-credentials admin admin
+    if ! ceph_adm tell mgr dashboard create-self-signed-cert; then
+        echo MGR dashboard is not working correctly
+    fi
 }
 
 start_mds() {
