@@ -60,6 +60,6 @@ export class OsdListComponent implements OnInit {
 
   collectStates(osd) {
     const select = (onState, offState) => osd[onState] ? onState : offState;
-    return [select('up', 'down'), select('in', 'out')]
+    return [select('up', 'down'), select('in', 'out')];
   }
 }
