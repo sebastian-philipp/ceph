@@ -5,11 +5,12 @@ from __future__ import absolute_import
 import json
 
 import cherrypy
+from cherrypy._cptools import HandlerWrapperTool
 from cherrypy.test import helper
 
 from ..controllers.auth import Auth
 from ..controllers import json_error_page, generate_controller_routes
-from ..tools import SessionExpireAtBrowserCloseTool
+from ..tools import SessionExpireAtBrowserCloseTool, dashboard_exception_handler
 
 
 class ControllerTestCase(helper.CPWebCase):
@@ -28,6 +29,7 @@ class ControllerTestCase(helper.CPWebCase):
     def __init__(self, *args, **kwargs):
         cherrypy.tools.authenticate = cherrypy.Tool('before_handler', Auth.check_auth)
         cherrypy.tools.session_expire_at_browser_close = SessionExpireAtBrowserCloseTool()
+        cherrypy.tools.dashboard_exception_handler = HandlerWrapperTool(dashboard_exception_handler)
         cherrypy.config.update({'error_page.default': json_error_page})
         super(ControllerTestCase, self).__init__(*args, **kwargs)
 

@@ -20,6 +20,16 @@ except ImportError:
 from .. import logger, mgr
 
 
+class RadosReturnError(Exception):
+    def __init__(self, err, cmd, argdict, errno):
+        self.errno = errno
+        argdict = argdict if isinstance(argdict, dict) else {}
+        cmd = cmd['prefix'] if isinstance(cmd, dict) and 'prefix' in cmd else cmd
+        s = 'Executing "{} {}" failed: "{}"'.format(cmd, ' '.join(
+            ['{}={}'.format(k, v) for k, v in argdict.items()]), err)
+        super(RadosReturnError, self).__init__(s)
+
+
 class CephService(object):
     @classmethod
     def get_service_map(cls, service_name):
@@ -145,7 +155,7 @@ class CephService(object):
             msg = "send_command '{}' failed. (r={}, outs=\"{}\", kwargs={})".format(prefix, r, outs,
                                                                                     kwargs)
             logger.error(msg)
-            raise ValueError(msg)
+            raise RadosReturnError(msg, prefix, argdict, r)
         else:
             try:
                 return json.loads(outb)

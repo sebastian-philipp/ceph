@@ -2,7 +2,6 @@
 from __future__ import absolute_import
 
 import math
-import cherrypy
 import rbd
 
 from . import ApiController, AuthRequired, RESTController
@@ -98,8 +97,6 @@ class Rbd(RESTController):
     def get(self, pool_name):
         # pylint: disable=unbalanced-tuple-unpacking
         status, value = self._rbd_list(pool_name)
-        if status == ViewCache.VALUE_EXCEPTION:
-            raise value
         return {'status': status, 'value': value}
 
     def create(self, data):
@@ -126,11 +123,7 @@ class Rbd(RESTController):
 
         ioctx = mgr.rados.open_ioctx(pool_name)
 
-        try:
-            self.rbd.create(ioctx, name, size, order=order, old_format=False,
-                            features=feature_bitmask, stripe_unit=stripe_unit,
-                            stripe_count=stripe_count, data_pool=data_pool)
-        except rbd.OSError as e:
-            cherrypy.response.status = 400
-            return {'success': False, 'detail': str(e), 'errno': e.errno}
+        self.rbd.create(ioctx, name, size, order=order, old_format=False,
+                        features=feature_bitmask, stripe_unit=stripe_unit,
+                        stripe_count=stripe_count, data_pool=data_pool)
         return {'success': True}

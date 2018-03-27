@@ -8,6 +8,7 @@ import cherrypy
 from . import AuthRequired, ApiController, BaseController
 from .. import logger, mgr
 from ..controllers.rbd_mirroring import get_daemons_and_pools
+from ..tools import ViewCacheNoDataException
 from ..services.ceph_service import CephService
 from ..tools import TaskManager
 
@@ -34,7 +35,10 @@ class Summary(BaseController):
         ]
 
     def _rbd_mirroring(self):
-        _, data = get_daemons_and_pools()
+        try:
+            _, data = get_daemons_and_pools()
+        except ViewCacheNoDataException:
+            return {}
 
         if isinstance(data, Exception):
             logger.exception("Failed to get rbd-mirror daemons and pools")

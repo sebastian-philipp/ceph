@@ -13,6 +13,179 @@ import cherrypy
 
 from . import logger
 
+def json_error_page(status, message, traceback, version):
+    cherrypy.response.headers['Content-Type'] = 'application/json'
+    return json.dumps(dict(status=status, detail=message, traceback=traceback,
+                           version=version))
+
+class ViewCacheNoDataException(Exception):
+    def __init__(self):
+        self.status = 200
+        self.errno = -1001
+        super(ViewCacheNoDataException, self).__init__('ViewCache: unable to retrieve data')
+
+
+# pylint: disable=too-many-locals
+def browsable_api_view(meth):
+    def wrapper(self, *vpath, **kwargs):
+        assert isinstance(self, BaseController)
+        if not Settings.ENABLE_BROWSABLE_API:
+            return meth(self, *vpath, **kwargs)
+        if 'text/html' not in cherrypy.request.headers.get('Accept', ''):
+            return meth(self, *vpath, **kwargs)
+        if '_method' in kwargs:
+            cherrypy.request.method = kwargs.pop('_method').upper()
+        if '_raw' in kwargs:
+            kwargs.pop('_raw')
+            return meth(self, *vpath, **kwargs)
+
+        template = """
+        <html>
+        <h1>Browsable API</h1>
+        {docstring}
+        <h2>Request</h2>
+        <p>{method} {breadcrump}</p>
+        <h2>Response</h2>
+        <p>Status: {status_code}<p>
+        <pre>{reponse_headers}</pre>
+        <form action="/api/{path}/{vpath}" method="get">
+        <input type="hidden" name="_raw" value="true" />
+        <button type="submit">GET raw data</button>
+        </form>
+        <h2>Data</h2>
+        <pre>{data}</pre>
+        {create_form}
+        <h2>Note</h2>
+        <p>Please note that this API is not an official Ceph REST API to be
+        used by third-party applications. It's primary purpose is to serve
+        the requirements of the Ceph Dashboard and is subject to change at
+        any time. Use at your own risk.</p>
+        """
+
+        create_form_template = """
+        <h2>Create Form</h2>
+        <form action="/api/{path}/{vpath}" method="post">
+        {fields}<br>
+        <input type="hidden" name="_method" value="post" />
+        <button type="submit">Create</button>
+        </form>
+        """
+
+        try:
+            data = meth(self, *vpath, **kwargs)
+        except Exception as e:  # pylint: disable=broad-except
+            except_template = """
+            <h2>Exception: {etype}: {tostr}</h2>
+            <pre>{trace}</pre>
+            Params: {kwargs}
+            """
+            import traceback
+            tb = sys.exc_info()[2]
+            cherrypy.response.headers['Content-Type'] = 'text/html'
+            data = except_template.format(
+                etype=e.__class__.__name__,
+                tostr=str(e),
+                trace='\n'.join(traceback.format_tb(tb)),
+                kwargs=kwargs
+            )
+
+        if cherrypy.response.headers['Content-Type'] == 'application/json':
+            data = json.dumps(json.loads(data), indent=2, sort_keys=True)
+
+        try:
+            create = getattr(self, 'create')
+            f_args = RESTController._function_args(create)
+            input_fields = ['{name}:<input type="text" name="{name}">'.format(name=name) for name in
+                            f_args]
+            create_form = create_form_template.format(
+                fields='<br>'.join(input_fields),
+                path=self._cp_path_,
+                vpath='/'.join(vpath)
+            )
+        except AttributeError:
+            create_form = ''
+
+        def mk_breadcrump(elems):
+            return '/'.join([
+                '<a href="/{}">{}</a>'.format('/'.join(elems[0:i+1]), e)
+                for i, e in enumerate(elems)
+            ])
+
+        cherrypy.response.headers['Content-Type'] = 'text/html'
+        return template.format(
+            docstring='<pre>{}</pre>'.format(self.__doc__) if self.__doc__ else '',
+            method=cherrypy.request.method,
+            path=self._cp_path_,
+            vpath='/'.join(vpath),
+            breadcrump=mk_breadcrump(['api', self._cp_path_] + list(vpath)),
+            status_code=cherrypy.response.status,
+            reponse_headers='\n'.join(
+                '{}: {}'.format(k, v) for k, v in cherrypy.response.headers.items()),
+            data=data,
+            create_form=create_form
+        )
+
+    wrapper.exposed = True
+    if hasattr(meth, '_cp_config'):
+        wrapper._cp_config = meth._cp_config
+    return wrapper
+
+
+def dashboard_exception_handler(handler, *args, **kwargs):
+    import rbd
+    import rados
+    from .services.ceph_service import RadosReturnError
+
+    def serialize(e):
+        out = dict(detail=str(e))
+        try:
+            out['errno'] = e.errno
+        except AttributeError:
+            pass
+        return out
+
+    try:
+        return handler(*args, **kwargs)
+    # Don't catch cherrypy.* Exceptions.
+    except ViewCacheNoDataException as e:
+        logger.exception('dashboard_exception_handler')
+        cherrypy.response.headers['Content-Type'] = 'application/json'
+        cherrypy.response.status = getattr(e, 'status', 400)
+        return json.dumps({'status': ViewCache.VALUE_NONE, 'value': None})
+    except (rbd.Error, rados.OSError, RadosReturnError) as e:
+        logger.exception('dashboard_exception_handler')
+        cherrypy.response.headers['Content-Type'] = 'application/json'
+        cherrypy.response.status = getattr(e, 'status', 400)
+        return json.dumps(serialize(e))
+
+
+
+class BaseControllerMeta(type):
+    def __new__(mcs, name, bases, dct):
+        new_cls = type.__new__(mcs, name, bases, dct)
+
+        for a_name in new_cls.__dict__:
+            thing = new_cls.__dict__[a_name]
+            if isinstance(thing, (types.FunctionType, types.MethodType))\
+                    and getattr(thing, 'exposed', False):
+
+                # @cherrypy.tools.json_out() is incompatible with our browsable_api_view decorator.
+                cp_config = getattr(thing, '_cp_config', {})
+                if not cp_config.get('tools.json_out.on', False):
+                    setattr(new_cls, a_name, browsable_api_view(thing))
+        return new_cls
+
+
+@add_metaclass(BaseControllerMeta)
+class BaseController(object):
+    """
+    Base class for all controllers providing API endpoints.
+    """
+
+    @cherrypy.expose
+    def default(self, *_vpath, **_params):
+        raise cherrypy.NotFound()
+
 
 class RequestLoggingTool(cherrypy.Tool):
     def __init__(self):
@@ -119,12 +292,13 @@ class ViewCache(object):
                 val = self.fn(*self.args, **self.kwargs)
                 t1 = time.time()
             except Exception as ex:
-                logger.exception("Error while calling fn=%s ex=%s", self.fn,
-                                 str(ex))
-                self._view.value = None
-                self._view.value_when = None
-                self._view.getter_thread = None
-                self._view.exception = ex
+                with self._view.lock:
+                    logger.exception("Error while calling fn=%s ex=%s", self.fn,
+                                     str(ex))
+                    self._view.value = None
+                    self._view.value_when = None
+                    self._view.getter_thread = None
+                    self._view.exception = ex
             else:
                 with self._view.lock:
                     self._view.latency = t1 - t0
@@ -184,13 +358,13 @@ class ViewCache(object):
                     # We fetched the data within the timeout
                     if self.exception:
                         # execution raised an exception
-                        return ViewCache.VALUE_EXCEPTION, self.exception
+                        raise self.exception  # pylint: disable=raising-bad-type
                     return ViewCache.VALUE_OK, self.value
                 elif self.value_when is not None:
                     # We have some data, but it doesn't meet freshness requirements
                     return ViewCache.VALUE_STALE, self.value
                 # We have no data, not even stale data
-                return ViewCache.VALUE_NONE, None
+                raise ViewCacheNoDataException()
 
     def __init__(self, timeout=5):
         self.timeout = timeout

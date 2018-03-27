@@ -7,6 +7,9 @@ from __future__ import absolute_import
 import errno
 import os
 import socket
+
+from cherrypy._cptools import HandlerWrapperTool
+
 try:
     from urlparse import urljoin
 except ImportError:
@@ -29,7 +32,7 @@ from . import logger, mgr
 from .controllers import generate_routes, json_error_page
 from .controllers.auth import Auth
 from .tools import SessionExpireAtBrowserCloseTool, NotificationQueue, \
-                   RequestLoggingTool, TaskManager
+                   RequestLoggingTool, TaskManager, dashboard_exception_handler
 from .settings import options_command_list, handle_option_command
 
 
@@ -115,6 +118,7 @@ class Module(MgrModule):
         # Initialize custom handlers.
         cherrypy.tools.authenticate = cherrypy.Tool('before_handler', Auth.check_auth)
         cherrypy.tools.session_expire_at_browser_close = SessionExpireAtBrowserCloseTool()
+        cherrypy.tools.dashboard_exception_handler = HandlerWrapperTool(dashboard_exception_handler)
         cherrypy.tools.request_logging = RequestLoggingTool()
 
         # Apply the 'global' CherryPy configuration.

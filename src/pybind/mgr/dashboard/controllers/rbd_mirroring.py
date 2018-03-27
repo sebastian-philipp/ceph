@@ -250,9 +250,6 @@ class RbdMirror(BaseController):
 
         pool_names = [pool['pool_name'] for pool in CephService.get_pool_list('rbd')]
         _, data = get_daemons_and_pools()
-        if isinstance(data, Exception):
-            logger.exception("Failed to get rbd-mirror daemons list")
-            raise type(data)(str(data))
         daemons = data.get('daemons', [])
         pool_stats = data.get('pools', {})
 

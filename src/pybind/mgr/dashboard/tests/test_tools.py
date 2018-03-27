@@ -7,6 +7,7 @@ from cherrypy.lib.sessions import RamSession
 from mock import patch
 
 from .helper import ControllerTestCase
+from ..tools import ViewCache
 from ..controllers import RESTController, ApiController
 from ..tools import is_valid_ipv6_address, dict_contains_path
 
@@ -35,6 +36,33 @@ class FooResource(RESTController):
     def set(self, key, data):
         FooResource.elems[int(key)] = data
         return dict(key=key, **data)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def vc_no_data(self):
+        @ViewCache(timeout=0)
+        def _no_data():
+            import time
+            time.sleep(0.2)
+
+        _no_data()
+        assert False
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def vc_exception(self):
+        @ViewCache(timeout=10)
+        def _raise():
+            import rados
+            raise rados.OSError('hi', errno=-42)
+
+        _raise()
+        assert False
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def internal_server_error(self):
+        return 1/0
 
 
 @ApiController('foo/:key/:method')
@@ -135,6 +163,22 @@ class RESTControllerTest(ControllerTestCase):
                      headers=[('Accept', 'text/html'), ('Content-Length', '0')],
                      method='put')
         self.assertStatus(404)
+
+    def test_viewcache_no_data(self):
+        self._get('/foo/vc_no_data')
+        self.assertStatus(200)
+        self.assertJsonBody({'status': ViewCache.VALUE_NONE, 'value': None})
+
+    def test_viewcache_exception(self):
+        self._get('/foo/vc_exception')
+        self.assertStatus(400)
+        self.assertJsonBody(
+            {'errno': -42, 'detail': '[errno -42] hi'})
+
+    def test_internal_server_error(self):
+        self._get('/foo/internal_server_error')
+        self.assertStatus(500)
+        self.assertIn('unexpected condition', self.jsonBody()['detail'])
 
 
 class TestFunctions(unittest.TestCase):
