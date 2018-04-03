@@ -6,6 +6,8 @@ import collections
 from collections import defaultdict
 import json
 
+import rados
+
 from mgr_module import CommandResult
 
 try:
@@ -20,14 +22,12 @@ except ImportError:
 from .. import logger, mgr
 
 
-class RadosReturnError(Exception):
-    def __init__(self, err, cmd, argdict, errno):
+class RadosReturnError(rados.Error):
+    def __init__(self, err, prefix, argdict, errno):
         self.errno = errno
-        argdict = argdict if isinstance(argdict, dict) else {}
-        cmd = cmd['prefix'] if isinstance(cmd, dict) and 'prefix' in cmd else cmd
-        s = 'Executing "{} {}" failed: "{}"'.format(cmd, ' '.join(
-            ['{}={}'.format(k, v) for k, v in argdict.items()]), err)
-        super(RadosReturnError, self).__init__(s)
+        self.prefix = prefix
+        self.argdict = argdict
+        super(RadosReturnError, self).__init__(err)
 
 
 class CephService(object):
@@ -155,7 +155,7 @@ class CephService(object):
             msg = "send_command '{}' failed. (r={}, outs=\"{}\", kwargs={})".format(prefix, r, outs,
                                                                                     kwargs)
             logger.error(msg)
-            raise RadosReturnError(msg, prefix, argdict, r)
+            raise RadosReturnError(outs, prefix, argdict, r)
         else:
             try:
                 return json.loads(outb)

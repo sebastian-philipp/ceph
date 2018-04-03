@@ -2,11 +2,15 @@
 from __future__ import absolute_import
 
 import math
+from contextlib import contextmanager
+from functools import wraps
+
 import rbd
 
 from . import ApiController, AuthRequired, RESTController
 from .. import mgr
 from ..tools import ViewCache
+from ..services.exception import c2d, handle_rados_error, handle_rbd_error
 
 
 @ApiController('rbd')
@@ -94,36 +98,52 @@ class Rbd(RESTController):
             result.append(stat)
         return result
 
+    @c2d(handle_rbd_error)
+    @c2d(handle_rados_error, 'pool')
     def get(self, pool_name):
         # pylint: disable=unbalanced-tuple-unpacking
         status, value = self._rbd_list(pool_name)
         return {'status': status, 'value': value}
 
-    def create(self, data):
+    @c2d(handle_rbd_error)
+    @c2d(handle_rados_error, 'pool')
+    @RESTController.args_from_json
+    def create(self, name, pool_name, size, obj_size=None, features=None, stripe_unit=None,
+               stripe_count=None, data_pool=None):
         if not self.rbd:
             self.rbd = rbd.RBD()
 
-        # Get input values
-        name = data.get('name')
-        pool_name = data.get('pool_name')
-        size = data.get('size')
-        obj_size = data.get('obj_size')
-        features = data.get('features')
-        stripe_unit = data.get('stripe_unit')
-        stripe_count = data.get('stripe_count')
-        data_pool = data.get('data_pool')
+        obj_size, features, stripe_unit, stripe_count, data_pool = [x if x else None for x in [
+            obj_size, features, stripe_unit, stripe_count, data_pool
+        ]]
 
         # Set order
         order = None
-        if obj_size and obj_size > 0:
+        if obj_size and float(obj_size) > 0:
             order = int(round(math.log(float(obj_size), 2)))
 
         # Set features
         feature_bitmask = self._format_features(features)
 
-        ioctx = mgr.rados.open_ioctx(pool_name)
-
-        self.rbd.create(ioctx, name, size, order=order, old_format=False,
-                        features=feature_bitmask, stripe_unit=stripe_unit,
-                        stripe_count=stripe_count, data_pool=data_pool)
+        with mgr.rados.open_ioctx(pool_name) as ioctx:
+            self.rbd.create(ioctx, name, int(size), order=order, old_format=False,
+                            features=feature_bitmask, stripe_unit=stripe_unit,
+                            stripe_count=stripe_count, data_pool=data_pool)
         return {'success': True}
+
+
+import errno
+
+def get_code_rasdos_with_errno(errno_val, func):
+    open_ioctx_offset = 200
+    return {
+        (errno.ENOENT, mgr.rados.open_ioctx): (None, open_ioctx_offset + errno.ENOENT),
+    }.get((errno_val, func), None)
+
+def get_code_rbd_with_errno(errno_val, func):
+    rbd_create_offset = 400
+    return {
+        (errno.EEXIST, rbd.RBD.create): (None, rbd_create_offset + errno.EEXIST),
+    }.get((errno_val, func), None)
+
+

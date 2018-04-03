@@ -12,6 +12,7 @@ from six.moves import urllib
 import cherrypy
 
 from . import logger
+from .services.exception import ViewCacheNoDataException, serialize_dashboard_exception
 
 def json_error_page(status, message, traceback, version):
     cherrypy.response.headers['Content-Type'] = 'application/json'
@@ -41,6 +42,12 @@ def browsable_api_view(meth):
 
         template = """
         <html>
+        <head>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+        </head>
+        <body><div class="container">
         <h1>Browsable API</h1>
         {docstring}
         <h2>Request</h2>
@@ -54,6 +61,7 @@ def browsable_api_view(meth):
         </form>
         <h2>Data</h2>
         <pre>{data}</pre>
+        {except_data}
         {create_form}
         <h2>Note</h2>
         <p>Please note that this API is not an official Ceph REST API to be
@@ -73,24 +81,32 @@ def browsable_api_view(meth):
 
         try:
             data = meth(self, *vpath, **kwargs)
+            if cherrypy.response.headers['Content-Type'] == 'application/json':
+                data = json.dumps(json.loads(data), indent=2, sort_keys=True)
+            except_data=''
         except Exception as e:  # pylint: disable=broad-except
             except_template = """
-            <h2>Exception: {etype}: {tostr}</h2>
+            <h2>Exception: {etype}: "{tostr}"</h2>
             <pre>{trace}</pre>
-            Params: {kwargs}
+            <p>Request Params: {kwargs}</p>
+            <p>e.__dict__: {edict}</p>
             """
             import traceback
             tb = sys.exc_info()[2]
             cherrypy.response.headers['Content-Type'] = 'text/html'
-            data = except_template.format(
-                etype=e.__class__.__name__,
+            data = serialize_dashboard_exception(e)
+            try:
+                data = json.dumps(json.loads(data), indent=2, sort_keys=True)
+            except Exception:
+                pass
+            except_data = except_template.format(
+                etype=e.__class__.__module__ + '.' + e.__class__.__name__,
                 tostr=str(e),
                 trace='\n'.join(traceback.format_tb(tb)),
-                kwargs=kwargs
+                kwargs=kwargs,
+                edict= e.__dict__ ,
             )
 
-        if cherrypy.response.headers['Content-Type'] == 'application/json':
-            data = json.dumps(json.loads(data), indent=2, sort_keys=True)
 
         try:
             create = getattr(self, 'create')
@@ -122,6 +138,7 @@ def browsable_api_view(meth):
             reponse_headers='\n'.join(
                 '{}: {}'.format(k, v) for k, v in cherrypy.response.headers.items()),
             data=data,
+            except_data=except_data,
             create_form=create_form
         )
 
@@ -131,32 +148,7 @@ def browsable_api_view(meth):
     return wrapper
 
 
-def dashboard_exception_handler(handler, *args, **kwargs):
-    import rbd
-    import rados
-    from .services.ceph_service import RadosReturnError
 
-    def serialize(e):
-        out = dict(detail=str(e))
-        try:
-            out['errno'] = e.errno
-        except AttributeError:
-            pass
-        return out
-
-    try:
-        return handler(*args, **kwargs)
-    # Don't catch cherrypy.* Exceptions.
-    except ViewCacheNoDataException as e:
-        logger.exception('dashboard_exception_handler')
-        cherrypy.response.headers['Content-Type'] = 'application/json'
-        cherrypy.response.status = getattr(e, 'status', 400)
-        return json.dumps({'status': ViewCache.VALUE_NONE, 'value': None})
-    except (rbd.Error, rados.OSError, RadosReturnError) as e:
-        logger.exception('dashboard_exception_handler')
-        cherrypy.response.headers['Content-Type'] = 'application/json'
-        cherrypy.response.status = getattr(e, 'status', 400)
-        return json.dumps(serialize(e))
 
 
 

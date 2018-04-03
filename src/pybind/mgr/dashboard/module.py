@@ -33,6 +33,7 @@ from .controllers import generate_routes, json_error_page
 from .controllers.auth import Auth
 from .tools import SessionExpireAtBrowserCloseTool, NotificationQueue, \
                    RequestLoggingTool, TaskManager, dashboard_exception_handler
+from .services.exception import dashboard_exception_handler
 from .settings import options_command_list, handle_option_command
 
 

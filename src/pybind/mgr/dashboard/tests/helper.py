@@ -10,6 +10,7 @@ from cherrypy.test import helper
 
 from ..controllers.auth import Auth
 from ..controllers import json_error_page, generate_controller_routes
+from ..services.exception import dashboard_exception_handler
 from ..tools import SessionExpireAtBrowserCloseTool, dashboard_exception_handler
 
 

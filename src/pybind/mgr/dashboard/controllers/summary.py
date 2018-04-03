@@ -40,12 +40,8 @@ class Summary(BaseController):
         except ViewCacheNoDataException:
             return {}
 
-        if isinstance(data, Exception):
-            logger.exception("Failed to get rbd-mirror daemons and pools")
-            raise type(data)(str(data))
-        else:
-            daemons = data.get('daemons', [])
-            pools = data.get('pools', {})
+        daemons = data.get('daemons', [])
+        pools = data.get('pools', {})
 
         warnings = 0
         errors = 0

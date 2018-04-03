@@ -3,13 +3,19 @@ from __future__ import absolute_import
 
 import unittest
 
+import cherrypy
 from cherrypy.lib.sessions import RamSession
 from mock import patch
+
+import rados
+
+from mgr.dashboard.services.ceph_service import RadosReturnError
 
 from .helper import ControllerTestCase
 from ..tools import ViewCache
 from ..controllers import RESTController, ApiController
 from ..tools import is_valid_ipv6_address, dict_contains_path
+from ..services.exception import c2d, handle_rados_error, handle_send_command_error
 
 
 # pylint: disable=W0613
@@ -39,6 +45,23 @@ class FooResource(RESTController):
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
+    @c2d(handle_rados_error, 'foo')
+    def error_foo_controller(self):
+        raise rados.OSError('hi', errno=-42)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    @c2d(handle_send_command_error, 'foo')
+    def error_send_command(self):
+        raise RadosReturnError('hi', 'prefix', {}, -42)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def error_generic(self):
+        raise rados.Error('hi')
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
     def vc_no_data(self):
         @ViewCache(timeout=0)
         def _no_data():
@@ -48,12 +71,12 @@ class FooResource(RESTController):
         _no_data()
         assert False
 
+    @c2d(handle_rados_error, 'foo')
     @cherrypy.expose
     @cherrypy.tools.json_out()
     def vc_exception(self):
         @ViewCache(timeout=10)
         def _raise():
-            import rados
             raise rados.OSError('hi', errno=-42)
 
         _raise()
@@ -164,6 +187,25 @@ class RESTControllerTest(ControllerTestCase):
                      method='put')
         self.assertStatus(404)
 
+    def test_error_foo_controller(self):
+        self._get('/foo/error_foo_controller')
+        self.assertStatus(400)
+        self.assertJsonBody(
+            {'detail': '[errno -42] hi', 'errno': -42, 'code': -42, 'controller': 'foo'}
+        )
+
+    def test_error_send_command(self):
+        self._get('/foo/error_send_command')
+        self.assertStatus(400)
+        self.assertJsonBody(
+            {'detail': 'hi', 'errno': -42, 'code': -42, 'controller': 'foo'}
+        )
+
+    def test_error_foo_generic(self):
+        self._get('/foo/error_generic')
+        self.assertJsonBody({'detail': 'hi', 'code': 'Error', 'controller': None})
+        self.assertStatus(400)
+
     def test_viewcache_no_data(self):
         self._get('/foo/vc_no_data')
         self.assertStatus(200)
@@ -173,7 +215,8 @@ class RESTControllerTest(ControllerTestCase):
         self._get('/foo/vc_exception')
         self.assertStatus(400)
         self.assertJsonBody(
-            {'errno': -42, 'detail': '[errno -42] hi'})
+            {'detail': '[errno -42] hi', 'errno': -42, 'code': -42, 'controller': 'foo'}
+        )
 
     def test_internal_server_error(self):
         self._get('/foo/internal_server_error')

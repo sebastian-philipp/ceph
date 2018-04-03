@@ -47,7 +47,7 @@ class RgwDaemon(RESTController):
         }
         service = CephService.get_service('rgw', svc_id)
         if not service:
-            return daemon
+            raise cherrypy.NotFound('unknown RGW')
 
         metadata = service['metadata']
         status = service['status']
