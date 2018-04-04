@@ -130,20 +130,3 @@ class Rbd(RESTController):
                             features=feature_bitmask, stripe_unit=stripe_unit,
                             stripe_count=stripe_count, data_pool=data_pool)
         return {'success': True}
-
-
-import errno
-
-def get_code_rasdos_with_errno(errno_val, func):
-    open_ioctx_offset = 200
-    return {
-        (errno.ENOENT, mgr.rados.open_ioctx): (None, open_ioctx_offset + errno.ENOENT),
-    }.get((errno_val, func), None)
-
-def get_code_rbd_with_errno(errno_val, func):
-    rbd_create_offset = 400
-    return {
-        (errno.EEXIST, rbd.RBD.create): (None, rbd_create_offset + errno.EEXIST),
-    }.get((errno_val, func), None)
-
-

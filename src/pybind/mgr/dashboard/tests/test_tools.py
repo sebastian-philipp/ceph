@@ -12,7 +12,6 @@ import rados
 from mgr.dashboard.services.ceph_service import RadosReturnError
 
 from .helper import ControllerTestCase
-from ..tools import ViewCache
 from ..controllers import RESTController, ApiController
 from ..tools import is_valid_ipv6_address, dict_contains_path
 from ..services.exception import c2d, handle_rados_error, handle_send_command_error
@@ -42,50 +41,6 @@ class FooResource(RESTController):
     def set(self, key, data):
         FooResource.elems[int(key)] = data
         return dict(key=key, **data)
-
-    @cherrypy.expose
-    @cherrypy.tools.json_out()
-    @c2d(handle_rados_error, 'foo')
-    def error_foo_controller(self):
-        raise rados.OSError('hi', errno=-42)
-
-    @cherrypy.expose
-    @cherrypy.tools.json_out()
-    @c2d(handle_send_command_error, 'foo')
-    def error_send_command(self):
-        raise RadosReturnError('hi', 'prefix', {}, -42)
-
-    @cherrypy.expose
-    @cherrypy.tools.json_out()
-    def error_generic(self):
-        raise rados.Error('hi')
-
-    @cherrypy.expose
-    @cherrypy.tools.json_out()
-    def vc_no_data(self):
-        @ViewCache(timeout=0)
-        def _no_data():
-            import time
-            time.sleep(0.2)
-
-        _no_data()
-        assert False
-
-    @c2d(handle_rados_error, 'foo')
-    @cherrypy.expose
-    @cherrypy.tools.json_out()
-    def vc_exception(self):
-        @ViewCache(timeout=10)
-        def _raise():
-            raise rados.OSError('hi', errno=-42)
-
-        _raise()
-        assert False
-
-    @cherrypy.expose
-    @cherrypy.tools.json_out()
-    def internal_server_error(self):
-        return 1/0
 
 
 @ApiController('foo/:key/:method')
