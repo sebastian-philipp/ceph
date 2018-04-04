@@ -104,3 +104,9 @@ class RESTControllerTest(ControllerTestCase):
         self._get('/foo/internal_server_error')
         self.assertStatus(500)
         self.assertIn('unexpected condition', self.jsonBody()['detail'])
+
+    def test_404(self):
+        self._get('/foo/not_found')
+        self.assertStatus(404)
+        self.assertIn('detail', self.jsonBody())
+
