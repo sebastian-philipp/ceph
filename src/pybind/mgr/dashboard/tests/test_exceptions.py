@@ -73,19 +73,19 @@ class RESTControllerTest(ControllerTestCase):
         self._get('/foo/error_foo_controller')
         self.assertStatus(400)
         self.assertJsonBody(
-            {'detail': '[errno -42] hi', 'errno': -42, 'code': -42, 'controller': 'foo'}
+            {'detail': '[errno -42] hi', 'errno': -42, 'code': -42, 'component': 'foo'}
         )
 
     def test_error_send_command(self):
         self._get('/foo/error_send_command')
         self.assertStatus(400)
         self.assertJsonBody(
-            {'detail': 'hi', 'errno': -42, 'code': -42, 'controller': 'foo'}
+            {'detail': 'hi', 'errno': -42, 'code': -42, 'component': 'foo'}
         )
 
     def test_error_foo_generic(self):
         self._get('/foo/error_generic')
-        self.assertJsonBody({'detail': 'hi', 'code': 'Error', 'controller': None})
+        self.assertJsonBody({'detail': 'hi', 'code': 'Error', 'component': None})
         self.assertStatus(400)
 
     def test_viewcache_no_data(self):
@@ -97,7 +97,7 @@ class RESTControllerTest(ControllerTestCase):
         self._get('/foo/vc_exception')
         self.assertStatus(400)
         self.assertJsonBody(
-            {'detail': '[errno -42] hi', 'errno': -42, 'code': -42, 'controller': 'foo'}
+            {'detail': '[errno -42] hi', 'errno': -42, 'code': -42, 'component': 'foo'}
         )
 
     def test_internal_server_error(self):

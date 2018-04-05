@@ -43,7 +43,7 @@ class CephfsTest(DashboardTestCase):
         data = self._get("/api/cephfs/mds_counters/baadbaad")
         self.assertStatus(400)
         self.assertJsonBody({
-                "controller": 'cephfs',
+                "component": 'cephfs',
                 "code": "invalid_cephfs_id",
                 "detail": "Invalid cephfs id baadbaad"
              })

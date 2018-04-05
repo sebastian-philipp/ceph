@@ -26,10 +26,10 @@ class DashboardException(Exception):
     Typically, you don't inherent from DashboardException
     Or, as a replacement for cherrypy.HTTPError(...)
     """
-    def __init__(self, e=None, code=None, controller=None, http_status_code=None, msg=None):
+    def __init__(self, e=None, code=None, component=None, http_status_code=None, msg=None):
         super(DashboardException, self).__init__(msg)
         self.code = code
-        self.controller = controller
+        self.component = component
         if e:
             self.e = e
         if http_status_code:
@@ -46,7 +46,7 @@ class DashboardException(Exception):
         return self.e.errno
 
 
-def serialize_dashboard_exception(e, code=None, controller=None):
+def serialize_dashboard_exception(e, code=None, component=None):
     cherrypy.response.status = getattr(e, 'status', 400)
     cherrypy.response.headers['Content-Type'] = 'application/json'
     out = dict(detail=str(e))
@@ -58,11 +58,11 @@ def serialize_dashboard_exception(e, code=None, controller=None):
         pass
     if code is None:
         code = getattr(e, 'code', None)
-    if controller is None:
-        controller = getattr(e, 'controller', None)
+    if component is None:
+        component = getattr(e, 'component', None)
     if code:
         out['code'] = code
-    out['controller'] = controller if controller else None
+    out['component'] = component if component else None
     return out
 
 
@@ -70,7 +70,7 @@ def dashboard_exception_handler(handler, *args, **kwargs):
     from ..tools import ViewCache
 
     try:
-        with handle_rados_error(controller=None):  # make the None controller the fallback.
+        with handle_rados_error(component=None):  # make the None controller the fallback.
             return handler(*args, **kwargs)
     # Don't catch cherrypy.* Exceptions.
     except ViewCacheNoDataException as e:
@@ -88,25 +88,25 @@ def handle_rbd_error():
     try:
         yield
     except rbd.OSError as e:
-        raise DashboardException(e, controller='rbd')
+        raise DashboardException(e, component='rbd')
     except rbd.Error as e:
-        raise DashboardException(e, controller='rbd', code=e.__class__.__name__)
+        raise DashboardException(e, component='rbd', code=e.__class__.__name__)
 
 @contextmanager
-def handle_rados_error(controller):
+def handle_rados_error(component):
     try:
         yield
     except rados.OSError as e:
-        raise DashboardException(e, controller=controller)
+        raise DashboardException(e, component=component)
     except rados.Error as e:
-        raise DashboardException(e, controller=controller, code=e.__class__.__name__)
+        raise DashboardException(e, component=component, code=e.__class__.__name__)
 
 @contextmanager
-def handle_send_command_error(controller):
+def handle_send_command_error(component):
     try:
         yield
     except RadosReturnError as e:
-        raise DashboardException(e, controller=controller)
+        raise DashboardException(e, component=component)
 
 
 def c2d(my_contextmanager, *cargs, **ckwargs):

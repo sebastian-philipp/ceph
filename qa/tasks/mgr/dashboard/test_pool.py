@@ -145,7 +145,7 @@ class PoolTest(DashboardTestCase):
         self.assertStatus(400)
         self.assertJsonBody({
             'errno': -2,
-            'controller': 'pool',
+            'component': 'pool',
             'code': -2,
             'detail': "specified rule dnf doesn't exist"
         })
