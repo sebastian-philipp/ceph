@@ -8,7 +8,7 @@ import rbd
 from . import ApiController, AuthRequired, RESTController
 from .. import mgr
 from ..tools import ViewCache
-from ..services.exception import c2d, handle_rados_error, handle_rbd_error
+from ..services.exception import set_handle_rados_error, set_handle_rbd_error
 
 
 @ApiController('rbd')
@@ -96,15 +96,15 @@ class Rbd(RESTController):
             result.append(stat)
         return result
 
-    @c2d(handle_rbd_error)
-    @c2d(handle_rados_error, 'pool')
+    @set_handle_rbd_error()
+    @set_handle_rados_error('pool')
     def get(self, pool_name):
         # pylint: disable=unbalanced-tuple-unpacking
         status, value = self._rbd_list(pool_name)
         return {'status': status, 'value': value}
 
-    @c2d(handle_rbd_error)
-    @c2d(handle_rados_error, 'pool')
+    @set_handle_rbd_error()
+    @set_handle_rados_error('pool')
     @RESTController.args_from_json
     def create(self, name, pool_name, size, obj_size=None, features=None, stripe_unit=None,
                stripe_count=None, data_pool=None):

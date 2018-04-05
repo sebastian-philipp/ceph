@@ -6,7 +6,7 @@ import cherrypy
 from . import ApiController, RESTController, AuthRequired
 from .. import mgr
 from ..services.ceph_service import CephService
-from ..services.exception import c2d, handle_send_command_error
+from ..services.exception import set_handle_send_command_error
 
 @ApiController('pool')
 @AuthRequired()
@@ -58,14 +58,14 @@ class Pool(RESTController):
             return cherrypy.NotFound('No such pool')
         return pool[0]
 
-    @c2d(handle_send_command_error, 'pool')
+    @set_handle_send_command_error('pool')
     def delete(self, pool_name):
         return CephService.send_command('mon', 'osd pool delete', pool=pool_name, pool2=pool_name,
                                         sure='--yes-i-really-really-mean-it')
 
     # pylint: disable=too-many-arguments, too-many-locals
     @RESTController.args_from_json
-    @c2d(handle_send_command_error, 'pool')
+    @set_handle_send_command_error('pool')
     def create(self, pool, pg_num, pool_type, erasure_code_profile=None, flags=None,
                application_metadata=None, rule_name=None, **kwargs):
         ecp = erasure_code_profile if erasure_code_profile else None

@@ -4,7 +4,7 @@ from __future__ import absolute_import
 from . import ApiController, AuthRequired, RESTController
 from .. import mgr
 from ..services.ceph_service import CephService
-from ..services.exception import c2d, handle_send_command_error
+from ..services.exception import set_handle_send_command_error
 
 @ApiController('osd')
 @AuthRequired()
@@ -47,7 +47,7 @@ class Osd(RESTController):
             osds[str(osd['id'])] = osd
         return osds
 
-    @c2d(handle_send_command_error, 'osd')
+    @set_handle_send_command_error('osd')
     def get(self, svc_id):
         histogram = CephService.send_command('osd', srv_spec=svc_id, prefix='perf histogram dump')
         return {

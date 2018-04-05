@@ -14,7 +14,7 @@ from mgr.dashboard.services.ceph_service import RadosReturnError
 from .helper import ControllerTestCase
 from ..controllers import RESTController, ApiController
 from ..tools import is_valid_ipv6_address, dict_contains_path
-from ..services.exception import c2d, handle_rados_error, handle_send_command_error
+from ..services.exception import set_handle_rados_error
 
 
 # pylint: disable=W0613
@@ -54,6 +54,11 @@ class FooArgs(RESTController):
     @RESTController.args_from_json
     def set(self, code, name=None, opt1=None, opt2=None):
         return {'code': code, 'name': name, 'opt1': opt1, 'opt2': opt2}
+
+    @RESTController.args_from_json
+    @set_handle_rados_error('foo')
+    def create(self, my_arg_name):
+        return my_arg_name
 
 
 # pylint: disable=C0102
@@ -141,6 +146,10 @@ class RESTControllerTest(ControllerTestCase):
                      headers=[('Accept', 'text/html'), ('Content-Length', '0')],
                      method='put')
         self.assertStatus(404)
+
+    def test_create_form(self):
+        self.getPage('/fooargs', headers=[('Accept', 'text/html')])
+        self.assertIn('my_arg_name', self.body.decode('utf-8'))
 
     def test_error_foo_controller(self):
         self._get('/foo/error_foo_controller')

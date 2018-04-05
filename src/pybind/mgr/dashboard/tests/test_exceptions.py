@@ -4,10 +4,10 @@ from __future__ import absolute_import
 import cherrypy
 
 import rados
-from ..services.ceph_service import RadosReturnError
+from ..services.ceph_service import SendCommandError
 
 from .helper import ControllerTestCase
-from ..services.exception import c2d, handle_rados_error, handle_send_command_error
+from ..services.exception import set_handle_rados_error, set_handle_send_command_error
 from ..tools import BaseController, ApiController, ViewCache
 
 
@@ -16,15 +16,15 @@ from ..tools import BaseController, ApiController, ViewCache
 class FooResource(BaseController):
     @cherrypy.expose
     @cherrypy.tools.json_out()
-    @c2d(handle_rados_error, 'foo')
+    @set_handle_rados_error('foo')
     def error_foo_controller(self):
         raise rados.OSError('hi', errno=-42)
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
-    @c2d(handle_send_command_error, 'foo')
+    @set_handle_send_command_error('foo')
     def error_send_command(self):
-        raise RadosReturnError('hi', 'prefix', {}, -42)
+        raise SendCommandError('hi', 'prefix', {}, -42)
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
@@ -42,7 +42,7 @@ class FooResource(BaseController):
         _no_data()
         assert False
 
-    @c2d(handle_rados_error, 'foo')
+    @set_handle_rados_error('foo')
     @cherrypy.expose
     @cherrypy.tools.json_out()
     def vc_exception(self):

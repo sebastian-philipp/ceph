@@ -120,5 +120,8 @@ class RbdTest(DashboardTestCase):
 
         self._post('/api/rbd', data)
         self.assertStatus(400)
-        self.assertJsonBody({"success": False, "errno": 17,
+        self.assertJsonBody({"success": False,
+                             "errno": 17,
+                             "code":"17",
+                             "component": "rbd",
                              "detail": "[errno 17] error creating image"})

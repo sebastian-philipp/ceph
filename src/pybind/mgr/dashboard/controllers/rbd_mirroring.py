@@ -13,7 +13,7 @@ from . import ApiController, AuthRequired, BaseController
 from .. import logger, mgr
 from ..services.ceph_service import CephService
 from ..tools import ViewCache
-from ..services.exception import c2d, handle_rbd_error
+from ..services.exception import set_handle_rbd_error
 
 
 @ViewCache()
@@ -166,7 +166,7 @@ class RbdMirror(BaseController):
     @cherrypy.expose
     @cherrypy.tools.json_out()
     @c2d(handle_rbd_error)
-    def __call__(self):
+    def default(self, *_vpath, **_params):
         status, content_data = self._get_content_data()
         return {'status': status, 'content_data': content_data}
 

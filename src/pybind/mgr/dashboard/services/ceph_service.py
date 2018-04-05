@@ -22,12 +22,12 @@ except ImportError:
 from .. import logger, mgr
 
 
-class RadosReturnError(rados.Error):
+class SendCommandError(Exception):
     def __init__(self, err, prefix, argdict, errno):
         self.errno = errno
         self.prefix = prefix
         self.argdict = argdict
-        super(RadosReturnError, self).__init__(err)
+        super(SendCommandError, self).__init__(err)
 
 
 class CephService(object):
@@ -155,7 +155,7 @@ class CephService(object):
             msg = "send_command '{}' failed. (r={}, outs=\"{}\", kwargs={})".format(prefix, r, outs,
                                                                                     kwargs)
             logger.error(msg)
-            raise RadosReturnError(outs, prefix, argdict, r)
+            raise SendCommandError(outs, prefix, argdict, r)
         else:
             try:
                 return json.loads(outb)

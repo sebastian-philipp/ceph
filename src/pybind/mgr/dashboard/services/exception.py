@@ -11,7 +11,7 @@ import rbd
 import rados
 
 from .. import logger
-from ..services.ceph_service import RadosReturnError
+from ..services.ceph_service import SendCommandError
 
 
 class ViewCacheNoDataException(Exception):
@@ -75,6 +75,15 @@ def dashboard_exception_handler(handler, *args, **kwargs):
     from ..tools import ViewCache
 
     try:
+        if hasattr(handler, 'handle_rbd_error'):
+            handler = _c2d(handle_rbd_error)
+
+        if hasattr(handler, 'handle_rados_error'):
+            handler = _c2d(handle_rados_error, getattr(handler, 'handle_rados_error'))
+
+        if hasattr(handler, 'handle_send_command_error'):
+            handler = _c2d(handle_send_command_error, getattr(handler, 'handle_send_command_error'))
+
         with handle_rados_error(component=None):  # make the None controller the fallback.
             return handler(*args, **kwargs)
     # Don't catch cherrypy.* Exceptions.
@@ -88,6 +97,13 @@ def dashboard_exception_handler(handler, *args, **kwargs):
         return json.dumps(serialize_dashboard_exception(e)).encode('utf-8')
 
 
+def _set_propety(key, value):
+    def decorator(f):
+        setattr(f, key, value)
+        return f
+    return decorator
+
+
 @contextmanager
 def handle_rbd_error():
     try:
@@ -96,6 +112,11 @@ def handle_rbd_error():
         raise DashboardException(e, component='rbd')
     except rbd.Error as e:
         raise DashboardException(e, component='rbd', code=e.__class__.__name__)
+
+
+def set_handle_rbd_error():
+    return _set_propety('handle_rbd_error', True)
+
 
 @contextmanager
 def handle_rados_error(component):
@@ -106,15 +127,24 @@ def handle_rados_error(component):
     except rados.Error as e:
         raise DashboardException(e, component=component, code=e.__class__.__name__)
 
+
+def set_handle_rados_error(component):
+    return _set_propety('handle_rados_error', component)
+
+
 @contextmanager
 def handle_send_command_error(component):
     try:
         yield
-    except RadosReturnError as e:
+    except SendCommandError as e:
         raise DashboardException(e, component=component)
 
 
-def c2d(my_contextmanager, *cargs, **ckwargs):
+def set_handle_send_command_error(component):
+    return _set_propety('set_handle_rados_error', component)
+
+
+def _c2d(my_contextmanager, *cargs, **ckwargs):
     """Converts a contextmanager into a decorator. Only needed for Python 2"""
     def decorator(f):
         @wraps(f)
