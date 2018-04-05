@@ -83,7 +83,7 @@ def browsable_api_view(meth):
             data = meth(self, *vpath, **kwargs)
             if cherrypy.response.headers['Content-Type'] == 'application/json':
                 data = json.dumps(json.loads(data), indent=2, sort_keys=True)
-            except_data=''
+            except_data = ''
         except Exception as e:  # pylint: disable=broad-except
             except_template = """
             <h2>Exception: {etype}: "{tostr}"</h2>
@@ -97,16 +97,15 @@ def browsable_api_view(meth):
             data = serialize_dashboard_exception(e)
             try:
                 data = json.dumps(json.loads(data), indent=2, sort_keys=True)
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 pass
             except_data = except_template.format(
                 etype=e.__class__.__module__ + '.' + e.__class__.__name__,
                 tostr=str(e),
                 trace='\n'.join(traceback.format_tb(tb)),
                 kwargs=kwargs,
-                edict= e.__dict__ ,
+                edict=e.__dict__,
             )
-
 
         try:
             create = getattr(self, 'create')

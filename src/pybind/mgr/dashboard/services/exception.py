@@ -26,9 +26,11 @@ class DashboardException(Exception):
     Typically, you don't inherent from DashboardException
     Or, as a replacement for cherrypy.HTTPError(...)
     """
+
+    # pylint: disable=too-many-arguments
     def __init__(self, e=None, code=None, component=None, http_status_code=None, msg=None):
         super(DashboardException, self).__init__(msg)
-        self.code = code
+        self._code = code
         self.component = component
         if e:
             self.e = e
@@ -45,23 +47,26 @@ class DashboardException(Exception):
     def errno(self):
         return self.e.errno
 
+    @property
+    def code(self):
+        if self._code:
+            return str(self._code)
+        return str(abs(self.errno))
 
-def serialize_dashboard_exception(e, code=None, component=None):
+
+def serialize_dashboard_exception(e):
     cherrypy.response.status = getattr(e, 'status', 400)
     cherrypy.response.headers['Content-Type'] = 'application/json'
     out = dict(detail=str(e))
     try:
         out['errno'] = e.errno
-        if code is None:
-            code = e.errno
     except AttributeError:
         pass
-    if code is None:
-        code = getattr(e, 'code', None)
-    if component is None:
-        component = getattr(e, 'component', None)
-    if code:
-        out['code'] = code
+    try:
+        out['code'] = e.code
+    except AttributeError:
+        pass
+    component = getattr(e, 'component', None)
     out['component'] = component if component else None
     return out
 

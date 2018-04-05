@@ -2,8 +2,6 @@
 from __future__ import absolute_import
 
 import math
-from contextlib import contextmanager
-from functools import wraps
 
 import rbd
 

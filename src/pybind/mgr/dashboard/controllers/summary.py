@@ -5,8 +5,8 @@ import json
 
 import cherrypy
 
+from .. import mgr
 from . import AuthRequired, ApiController, BaseController
-from .. import logger, mgr
 from ..controllers.rbd_mirroring import get_daemons_and_pools
 from ..tools import ViewCacheNoDataException
 from ..services.ceph_service import CephService

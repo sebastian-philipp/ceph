@@ -83,7 +83,7 @@ class CephFS(BaseController):
         except ValueError:
             raise DashboardException(code='invalid_cephfs_id',
                                      msg="Invalid cephfs id {}".format(fs_id),
-                                     controller='cephfs')
+                                     component='cephfs')
 
     def _get_mds_names(self, filesystem_id=None):
         names = []

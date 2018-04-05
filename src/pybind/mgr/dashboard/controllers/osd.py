@@ -2,7 +2,7 @@
 from __future__ import absolute_import
 
 from . import ApiController, AuthRequired, RESTController
-from .. import logger, mgr
+from .. import mgr
 from ..services.ceph_service import CephService
 from ..services.exception import c2d, handle_send_command_error
 
