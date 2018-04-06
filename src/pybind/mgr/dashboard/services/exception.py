@@ -3,9 +3,10 @@ from __future__ import absolute_import
 
 import json
 from contextlib import contextmanager
-from functools import wraps
+from functools import partial
 
 import cherrypy
+from cherrypy._cptools import Tool
 
 import rbd
 import rados
@@ -70,38 +71,37 @@ def serialize_dashboard_exception(e):
     out['component'] = component if component else None
     return out
 
+@partial(Tool, 'before_handler', name='dashboard_exception_handler')
+def dashboard_exception_handler(_handle_rbd_error=False,
+                                _handle_rados_error=None,
+                                _handle_send_command_error=None):
 
-def dashboard_exception_handler(handler, *args, **kwargs):
-    from ..tools import ViewCache
+    def inner(*args, **kwargs):
+        from ..tools import ViewCache
+        handler = innerfunc
 
-    try:
-        if hasattr(handler, 'handle_rbd_error'):
-            handler = _c2d(handle_rbd_error)
+        try:
+            if _handle_rbd_error:
+                handler = _c2d(handle_rbd_error)(handler)
 
-        if hasattr(handler, 'handle_rados_error'):
-            handler = _c2d(handle_rados_error, getattr(handler, 'handle_rados_error'))
+            handler = _c2d(handle_rados_error, _handle_rados_error)(handler)
 
-        if hasattr(handler, 'handle_send_command_error'):
-            handler = _c2d(handle_send_command_error, getattr(handler, 'handle_send_command_error'))
+            if _handle_send_command_error:
+                handler = _c2d(handle_send_command_error, _handle_send_command_error)(handler)
 
-        with handle_rados_error(component=None):  # make the None controller the fallback.
             return handler(*args, **kwargs)
-    # Don't catch cherrypy.* Exceptions.
-    except ViewCacheNoDataException as e:
-        logger.exception('dashboard_exception_handler')
-        cherrypy.response.headers['Content-Type'] = 'application/json'
-        cherrypy.response.status = getattr(e, 'status', 400)
-        return json.dumps({'status': ViewCache.VALUE_NONE, 'value': None}).encode('utf-8')
-    except DashboardException as e:
-        logger.exception('dashboard_exception_handler')
-        return json.dumps(serialize_dashboard_exception(e)).encode('utf-8')
+        # Don't catch cherrypy.* Exceptions.
+        except ViewCacheNoDataException as e:
+            logger.exception('dashboard_exception_handler')
+            cherrypy.response.headers['Content-Type'] = 'application/json'
+            cherrypy.response.status = getattr(e, 'status', 400)
+            return json.dumps({'status': ViewCache.VALUE_NONE, 'value': None}).encode('utf-8')
+        except DashboardException as e:
+            logger.exception('dashboard_exception_handler')
+            return json.dumps(serialize_dashboard_exception(e)).encode('utf-8')
 
-
-def _set_propety(key, value):
-    def decorator(f):
-        setattr(f, key, value)
-        return f
-    return decorator
+    innerfunc = cherrypy.serving.request.handler
+    cherrypy.serving.request.handler = inner
 
 
 @contextmanager
@@ -115,7 +115,17 @@ def handle_rbd_error():
 
 
 def set_handle_rbd_error():
-    return _set_propety('handle_rbd_error', True)
+    """
+    Meant to be used as a decorator.
+
+    >>> @cherrypy.expose
+    ... @set_handle_rbd_error
+    ... def error_send_command(self):
+    ...     pass
+
+    Instead of calling `dashboard_exception_handler` from above, it just enables the tool
+    """
+    return dashboard_exception_handler(_handle_rbd_error=True)
 
 
 @contextmanager
@@ -129,7 +139,17 @@ def handle_rados_error(component):
 
 
 def set_handle_rados_error(component):
-    return _set_propety('handle_rados_error', component)
+    """
+    Meant to be used as a decorator.
+
+    >>> @cherrypy.expose
+    ... @set_handle_rados_error('foo')
+    ... def error_send_command(self):
+    ...     raise SendCommandError('hi', 'prefix', {}, -42)
+
+    Instead of calling `dashboard_exception_handler` from above, it just enables the tool
+    """
+    return dashboard_exception_handler(_handle_rados_error=component)
 
 
 @contextmanager
@@ -141,13 +161,22 @@ def handle_send_command_error(component):
 
 
 def set_handle_send_command_error(component):
-    return _set_propety('set_handle_rados_error', component)
+    """
+    Meant to be used as a decorator.
+
+    >>> @cherrypy.expose
+    ... @set_handle_send_command_error('foo')
+    ... def error_send_command(self):
+    ...     pass
+
+    Instead of calling `dashboard_exception_handler` from above, it just enables the tool
+    """
+    return dashboard_exception_handler(_handle_send_command_error=component)
 
 
 def _c2d(my_contextmanager, *cargs, **ckwargs):
     """Converts a contextmanager into a decorator. Only needed for Python 2"""
     def decorator(f):
-        @wraps(f)
         def wrapper(*args, **kwargs):
             with my_contextmanager(*cargs, **ckwargs):
                 return f(*args, **kwargs)

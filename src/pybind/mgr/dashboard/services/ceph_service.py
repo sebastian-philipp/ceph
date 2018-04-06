@@ -6,8 +6,6 @@ import collections
 from collections import defaultdict
 import json
 
-import rados
-
 from mgr_module import CommandResult
 
 try:
