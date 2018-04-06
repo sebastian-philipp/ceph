@@ -55,6 +55,18 @@ class DashboardException(Exception):
         return str(abs(self.errno))
 
 
+def browsable_exception(func):
+    def wrapper(e):
+        from ..tools import browsable_api_enabled, render_browsable_api
+        if not browsable_api_enabled():
+            return json.dumps(func(e)).encode('utf-8')
+
+        return render_browsable_api(getattr(e, '_originating_controller', None), [], e, {}, func(e))
+
+    return wrapper
+
+
+@browsable_exception
 def serialize_dashboard_exception(e):
     cherrypy.response.status = getattr(e, 'status', 400)
     cherrypy.response.headers['Content-Type'] = 'application/json'
@@ -71,13 +83,20 @@ def serialize_dashboard_exception(e):
     out['component'] = component if component else None
     return out
 
+@browsable_exception
+def serialize_no_data(e):
+    from ..tools import ViewCache
+    cherrypy.response.headers['Content-Type'] = 'application/json'
+    cherrypy.response.status = getattr(e, 'status', 400)
+    return {'status': ViewCache.VALUE_NONE, 'value': None}
+
+
 @partial(Tool, 'before_handler', name='dashboard_exception_handler')
 def dashboard_exception_handler(_handle_rbd_error=False,
                                 _handle_rados_error=None,
                                 _handle_send_command_error=None):
 
     def inner(*args, **kwargs):
-        from ..tools import ViewCache
         handler = innerfunc
 
         try:
@@ -93,12 +112,16 @@ def dashboard_exception_handler(_handle_rbd_error=False,
         # Don't catch cherrypy.* Exceptions.
         except ViewCacheNoDataException as e:
             logger.exception('dashboard_exception_handler')
-            cherrypy.response.headers['Content-Type'] = 'application/json'
-            cherrypy.response.status = getattr(e, 'status', 400)
-            return json.dumps({'status': ViewCache.VALUE_NONE, 'value': None}).encode('utf-8')
+            return serialize_no_data(e)
         except DashboardException as e:
             logger.exception('dashboard_exception_handler')
-            return json.dumps(serialize_dashboard_exception(e)).encode('utf-8')
+            return serialize_dashboard_exception(e)
+        except Exception as e:
+            from ..tools import browsable_api_enabled
+            if not browsable_api_enabled():
+                raise
+            logger.exception('dashboard_exception_handler')
+            return browsable_exception(lambda e: {})(e)
 
     innerfunc = cherrypy.serving.request.handler
     cherrypy.serving.request.handler = inner

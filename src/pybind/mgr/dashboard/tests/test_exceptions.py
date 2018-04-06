@@ -7,13 +7,14 @@ import rados
 from ..services.ceph_service import SendCommandError
 
 from .helper import ControllerTestCase
-from ..services.exception import set_handle_rados_error, set_handle_send_command_error
-from ..tools import BaseController, ApiController, ViewCache
+from ..services.exception import set_handle_rados_error, set_handle_send_command_error, \
+    handle_send_command_error
+from ..tools import BaseController, ApiController, ViewCache, RESTController
 
 
 # pylint: disable=W0613
 @ApiController('foo')
-class FooResource(BaseController):
+class FooResource(RESTController):
     @cherrypy.expose
     @cherrypy.tools.json_out()
     @set_handle_rados_error('foo')
@@ -21,7 +22,6 @@ class FooResource(BaseController):
         raise rados.OSError('hi', errno=-42)
 
     @cherrypy.expose
-    @cherrypy.tools.json_out()
     @set_handle_send_command_error('foo')
     def error_send_command(self):
         raise SendCommandError('hi', 'prefix', {}, -42)
@@ -58,6 +58,11 @@ class FooResource(BaseController):
     def internal_server_error(self):
         return 1/0
 
+    @set_handle_send_command_error('foo')
+    def list(self):
+        raise SendCommandError('list', 'prefix', {}, -42)
+
+
 # pylint: disable=C0102
 class Root(object):
     foo = FooResource()
@@ -83,6 +88,18 @@ class RESTControllerTest(ControllerTestCase):
             {'detail': 'hi', 'errno': -42, 'code': "42", 'component': 'foo'}
         )
 
+    def test_error_send_command_list(self):
+        self._get('/foo/')
+        self.assertStatus(400)
+        self.assertJsonBody(
+            {'detail': 'list', 'errno': -42, 'code': "42", 'component': 'foo'}
+        )
+
+    def test_error_send_command_bowsable_api(self):
+        self.getPage('/foo/error_send_command', headers=[('Accept', 'text/html')])
+        for err in ["'detail': 'hi'", "'component': 'foo'"]:
+            self.assertIn(err.replace("'", "\'").encode('utf-8'), self.body)
+
     def test_error_foo_generic(self):
         self._get('/foo/error_generic')
         self.assertJsonBody({'detail': 'hi', 'code': 'Error', 'component': None})
@@ -106,6 +123,6 @@ class RESTControllerTest(ControllerTestCase):
         self.assertIn('unexpected condition', self.jsonBody()['detail'])
 
     def test_404(self):
-        self._get('/foo/not_found')
+        self._get('/foonot_found')
         self.assertStatus(404)
         self.assertIn('detail', self.jsonBody())

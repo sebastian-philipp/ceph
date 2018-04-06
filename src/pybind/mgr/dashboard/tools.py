@@ -19,6 +19,13 @@ def json_error_page(status, message, traceback, version):
     return json.dumps(dict(status=status, detail=message, traceback=traceback,
                            version=version))
 
+def browsable_api_enabled():
+    if not Settings.ENABLE_BROWSABLE_API:
+        return False
+    if 'text/html' not in cherrypy.request.headers.get('Accept', ''):
+        return False
+    return True
+
 class ViewCacheNoDataException(Exception):
     def __init__(self):
         self.status = 200
@@ -30,116 +37,25 @@ class ViewCacheNoDataException(Exception):
 def browsable_api_view(meth):
     def wrapper(self, *vpath, **kwargs):
         assert isinstance(self, BaseController)
-        if not Settings.ENABLE_BROWSABLE_API:
+        if not browsable_api_enabled():
             return meth(self, *vpath, **kwargs)
-        if 'text/html' not in cherrypy.request.headers.get('Accept', ''):
-            return meth(self, *vpath, **kwargs)
+
         if '_method' in kwargs:
             cherrypy.request.method = kwargs.pop('_method').upper()
         if '_raw' in kwargs:
             kwargs.pop('_raw')
             return meth(self, *vpath, **kwargs)
 
-        template = """
-        <html>
-        <head>
-        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
-        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
-        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
-        </head>
-        <body><div class="container">
-        <h1>Browsable API</h1>
-        {docstring}
-        <h2>Request</h2>
-        <p>{method} {breadcrump}</p>
-        <h2>Response</h2>
-        <p>Status: {status_code}<p>
-        <pre>{reponse_headers}</pre>
-        <form action="/api/{path}/{vpath}" method="get">
-        <input type="hidden" name="_raw" value="true" />
-        <button type="submit">GET raw data</button>
-        </form>
-        <h2>Data</h2>
-        <pre>{data}</pre>
-        {except_data}
-        {create_form}
-        <h2>Note</h2>
-        <p>Please note that this API is not an official Ceph REST API to be
-        used by third-party applications. It's primary purpose is to serve
-        the requirements of the Ceph Dashboard and is subject to change at
-        any time. Use at your own risk.</p>
-        """
-
-        create_form_template = """
-        <h2>Create Form</h2>
-        <form action="/api/{path}/{vpath}" method="post">
-        {fields}<br>
-        <input type="hidden" name="_method" value="post" />
-        <button type="submit">Create</button>
-        </form>
-        """
-
         try:
             data = meth(self, *vpath, **kwargs)
-            if cherrypy.response.headers['Content-Type'] == 'application/json':
-                data = json.dumps(json.loads(data), indent=2, sort_keys=True)
-            except_data = ''
-        except Exception as e:  # pylint: disable=broad-except
-            except_template = """
-            <h2>Exception: {etype}: "{tostr}"</h2>
-            <pre>{trace}</pre>
-            <p>Request Params: {kwargs}</p>
-            <p>e.__dict__: {edict}</p>
-            """
-            import traceback
-            tb = sys.exc_info()[2]
-            cherrypy.response.headers['Content-Type'] = 'text/html'
-            data = serialize_dashboard_exception(e)
-            try:
-                data = json.dumps(json.loads(data), indent=2, sort_keys=True)
-            except Exception:  # pylint: disable=broad-except
-                pass
-            except_data = except_template.format(
-                etype=e.__class__.__module__ + '.' + e.__class__.__name__,
-                tostr=str(e),
-                trace='\n'.join(traceback.format_tb(tb)),
-                kwargs=kwargs,
-                edict=e.__dict__,
-            )
+        except Exception as e:
+            e._originating_controller = self
+            raise
 
-        try:
-            create = getattr(self, 'create')
-            f_args = RESTController._function_args(create)
-            input_fields = ['{name}:<input type="text" name="{name}">'.format(name=name) for name in
-                            f_args]
-            create_form = create_form_template.format(
-                fields='<br>'.join(input_fields),
-                path=self._cp_path_,
-                vpath='/'.join(vpath)
-            )
-        except AttributeError:
-            create_form = ''
+        if cherrypy.response.headers['Content-Type'] == 'application/json':
+            data = json.dumps(json.loads(data), indent=2, sort_keys=True)
 
-        def mk_breadcrump(elems):
-            return '/'.join([
-                '<a href="/{}">{}</a>'.format('/'.join(elems[0:i+1]), e)
-                for i, e in enumerate(elems)
-            ])
-
-        cherrypy.response.headers['Content-Type'] = 'text/html'
-        return template.format(
-            docstring='<pre>{}</pre>'.format(self.__doc__) if self.__doc__ else '',
-            method=cherrypy.request.method,
-            path=self._cp_path_,
-            vpath='/'.join(vpath),
-            breadcrump=mk_breadcrump(['api', self._cp_path_] + list(vpath)),
-            status_code=cherrypy.response.status,
-            reponse_headers='\n'.join(
-                '{}: {}'.format(k, v) for k, v in cherrypy.response.headers.items()),
-            data=data,
-            except_data=except_data,
-            create_form=create_form
-        )
+        return render_browsable_api(self, vpath, None, kwargs, data)
 
     wrapper.exposed = True
     if hasattr(meth, '_cp_config'):
@@ -147,7 +63,105 @@ def browsable_api_view(meth):
     return wrapper
 
 
+def render_browsable_api(self, vpath, e, kwargs, data):
+    template = """
+    <html>
+    <head>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+    </head>
+    <body><div class="container">
+    <h1>Browsable API</h1>
+    {docstring}
+    <h2>Request</h2>
+    <p>{method} {breadcrump}</p>
+    <h2>Response</h2>
+    <p>Status: {status_code}<p>
+    <pre>{reponse_headers}</pre>
+    <form action="/api/{path}/{vpath}" method="get">
+    <input type="hidden" name="_raw" value="true" />
+    <button type="submit">GET raw data</button>
+    </form>
+    <h2>Data</h2>
+    <pre>{data}</pre>
+    {except_data}
+    {create_form}
+    <h2>Note</h2>
+    <p>Please note that this API is not an official Ceph REST API to be
+    used by third-party applications. It's primary purpose is to serve
+    the requirements of the Ceph Dashboard and is subject to change at
+    any time. Use at your own risk.</p>
+    """
 
+    create_form_template = """
+    <h2>Create Form</h2>
+    <form action="/api/{path}/{vpath}" method="post">
+    {fields}<br>
+    <input type="hidden" name="_method" value="post" />
+    <button type="submit">Create</button>
+    </form>
+    """
+
+    if e:
+        except_template = """
+        <h2>Exception: {etype}: "{tostr}"</h2>
+        <pre>{trace}</pre>
+        <p>Request Params: {kwargs}</p>
+        <p>e.__dict__: {edict}</p>
+        """
+        import traceback
+        tb = sys.exc_info()[2]
+        cherrypy.response.headers['Content-Type'] = 'text/html'
+        try:
+            data = json.dumps(json.loads(data), indent=2, sort_keys=True)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        except_data = except_template.format(
+            etype=e.__class__.__module__ + '.' + e.__class__.__name__,
+            tostr=str(e),
+            trace='\n'.join(traceback.format_tb(tb)),
+            kwargs=kwargs,
+            edict=e.__dict__,
+        )
+    else:
+        except_data = ''
+
+    try:
+        create = getattr(self, 'create')
+        f_args = RESTController._function_args(create)
+        input_fields = ['{name}:<input type="text" name="{name}">'.format(name=name) for name in
+                        f_args]
+        create_form = create_form_template.format(
+            fields='<br>'.join(input_fields),
+            path=self._cp_path_,
+            vpath='/'.join(vpath)
+        )
+    except AttributeError:
+        create_form = ''
+
+    def mk_breadcrump(elems):
+        return '/'.join([
+            '<a href="/{}">{}</a>'.format('/'.join(elems[0:i + 1]), e)
+            for i, e in enumerate(elems)
+        ])
+
+    cherrypy.response.headers['Content-Type'] = 'text/html'
+
+    doc = getattr(self, '__doc__', None)
+    return template.format(
+        docstring='<pre>{}</pre>'.format(doc if doc else ''),
+        method=cherrypy.request.method,
+        path=getattr(self, '_cp_path_', ''),
+        vpath='/'.join(vpath),
+        breadcrump=mk_breadcrump(['api', getattr(self, '_cp_path_', '')] + list(vpath)),
+        status_code=cherrypy.response.status,
+        reponse_headers='\n'.join(
+            '{}: {}'.format(k, v) for k, v in cherrypy.response.headers.items()),
+        data=data,
+        except_data=except_data,
+        create_form=create_form
+    ).encode('utf-8')
 
 
 
