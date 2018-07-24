@@ -11,10 +11,11 @@ import socket
 import tempfile
 import threading
 from uuid import uuid4
+import logging
 
 from OpenSSL import crypto
 
-from mgr_module import MgrModule, MgrStandbyModule
+from mgr_module import MgrModule, MgrStandbyModule, CPlusPlusHandler
 
 try:
     from urlparse import urljoin
@@ -27,6 +28,10 @@ try:
 except ImportError:
     # To be picked up and reported by .can_run()
     cherrypy = None
+
+import sys
+sys.path.append('/usr/local/lib/python2.7/dist-packages/pycharm-debug.egg')
+import pydevd
 
 
 # The SSL code in CherryPy 3.5.0 is buggy.  It was fixed long ago,
@@ -71,7 +76,7 @@ from .settings import options_command_list, options_schema_list, \
 # cherrypy likes to sys.exit on error.  don't let it take us down too!
 # pylint: disable=W0613
 def os_exit_noop(*args):
-    pass
+    logging.info('os_exit_noop')
 
 
 # pylint: disable=W0212
@@ -90,20 +95,31 @@ class ServerConfigException(Exception):
     pass
 
 
-class SSLCherryPyConfig(object):
+class CherryPyConfig(object):
     """
     Class for common server configuration done by both active and
     standby module, especially setting up SSL.
     """
-    def __init__(self):
-        self._stopping = threading.Event()
+    STATE_RUNNING = 1
+    STATE_STOPPING = 2
+    STATE_RESTARTING = 3
+
+    def __init__(self, *args, **kwargs):
+        super(CherryPyConfig, self).__init__(*args, **kwargs)
+        self.server_state = CherryPyConfig.STATE_RUNNING
+        self.server_state_event = threading.Event()
+
         self._url_prefix = ""
 
         self.cert_tmp = None
         self.pkey_tmp = None
 
     def shutdown(self):
-        self._stopping.set()
+        self.log.info("Stopping engine...")
+        super(CherryPyConfig, self).shutdown()
+        self.server_state = CherryPyConfig.STATE_STOPPING
+        self.server_state_event.set()
+        self.log.info("Stopped engine...")
 
     @property
     def url_prefix(self):
@@ -182,28 +198,30 @@ class SSLCherryPyConfig(object):
 
         return uri
 
-    def await_configuration(self):
+    def await_shutdown(self, serve_func):
         """
         Block until configuration is ready (i.e. all needed keys are set)
         or self._stopping is set.
 
         :returns URI of configured webserver
         """
-        while not self._stopping.is_set():
+        logger.warning('await_shutdown.' + str(self.server_state))
+        first_run = True
+        while self.server_state != CherryPyConfig.STATE_STOPPING:
             try:
-                uri = self._configure()
+                serve_func(first_run)
             except ServerConfigException as e:
-                self.log.info("Config not ready to serve, waiting: {0}".format(
+                self.log.warning("Config not ready to serve, waiting: {0}".format(
                     e
                 ))
                 # Poll until a non-errored config is present
-                self._stopping.wait(5)
+                self.server_state_event.wait(timeout=5)
             else:
-                self.log.info("Configured CherryPy, starting engine...")
-                return uri
+                first_run = False
+                self.log.warning("Configured CherryPy, starting engine...")
 
 
-class Module(MgrModule, SSLCherryPyConfig):
+class Module(CherryPyConfig, MgrModule):
     """
     dashboard module entrypoint
     """
@@ -218,6 +236,16 @@ class Module(MgrModule, SSLCherryPyConfig):
         {
             "cmd": "dashboard create-self-signed-cert",
             "desc": "Create self signed certificate",
+            "perm": "w"
+        },
+        {
+            "cmd": "dashboard set-crt",
+            "desc": "Set certificate. Usage: ceph dashboard set-crt -i <file>",
+            "perm": "w"
+        },
+        {
+            "cmd": "dashboard set-key",
+            "desc": "Set certificate. Usage: ceph dashboard set-key -i <file>",
             "perm": "w"
         },
     ]
@@ -238,12 +266,8 @@ class Module(MgrModule, SSLCherryPyConfig):
 
     def __init__(self, *args, **kwargs):
         super(Module, self).__init__(*args, **kwargs)
-        SSLCherryPyConfig.__init__(self)
 
         mgr.init(self)
-
-        self._stopping = threading.Event()
-        self.shutdown_event = threading.Event()
 
     @classmethod
     def can_run(cls):
@@ -261,14 +285,27 @@ class Module(MgrModule, SSLCherryPyConfig):
         return os.path.join(current_dir, 'frontend/dist')
 
     def serve(self):
+        try:
+            pydevd.settrace('localhost', port=12345, stdoutToServer=True, stderrToServer=True)
+        except IOError:
+            pass
+
         if 'COVERAGE_ENABLED' in os.environ:
             _cov.start()
 
+        self.await_shutdown(self._serve)
+
+
+
+        if 'COVERAGE_ENABLED' in os.environ:
+            _cov.stop()
+            _cov.save()
+
+    def _serve(self, first_run):
         AuthManager.initialize()
 
-        uri = self.await_configuration()
-        if uri is None:
-            # We were shut down while waiting
+        uri = self._configure()
+        if self.server_state == CherryPyConfig.STATE_STOPPING:
             return
 
         # Publish the URI that others may use to access the service we're
@@ -288,29 +325,45 @@ class Module(MgrModule, SSLCherryPyConfig):
             config[purl] = {
                 'request.dispatch': mapper
             }
-        cherrypy.tree.mount(None, config=config)
 
-        cherrypy.engine.start()
+        #cherrypy.tree.mount(None, config=config)
+        class HelloWorld(object):
+            @cherrypy.expose
+            def index(self):
+                return "Hello world!"
+
+            @cherrypy.expose
+            def x(self):
+                cherrypy.engine.restart()
+
+        cherrypy.tree.mount(HelloWorld(), '', None)
+        cherrypy.engine.signals.subscribe()
+
+        if first_run:
+            #cherrypy.engine.log = self.log
+            cherrypy.engine.start()
+            cherrypy.log.access_log.setLevel(logging.DEBUG)
+            cherrypy.log.error_log.setLevel(logging.DEBUG)
+            for h in cherrypy.log.error_log.handlers:
+                h.setLevel(logging.DEBUG)
+            cherrypy.engine.log("This should appear1")
+            logging.debug("appear13")
+        else:
+            cherrypy.server.httpserver = None
+            cherrypy.engine.start()
+            #cherrypy.engine.restart()
         NotificationQueue.start_queue()
         TaskManager.init()
-        logger.info('Engine started.')
+        logger.warning('Engine started.')
         # wait for the shutdown event
-        self.shutdown_event.wait()
-        self.shutdown_event.clear()
+        self.server_state_event.wait()
+        self.server_state_event.clear()
         NotificationQueue.stop()
         cherrypy.engine.stop()
-        if 'COVERAGE_ENABLED' in os.environ:
-            _cov.stop()
-            _cov.save()
-        logger.info('Engine stopped')
-
-    def shutdown(self):
-        super(Module, self).shutdown()
-        SSLCherryPyConfig.shutdown(self)
-        logger.info('Stopping engine...')
-        self.shutdown_event.set()
+        logger.warning('Engine stopped')
 
     def handle_command(self, inbuf, cmd):
+        logger.warning('{} {}'.format(inbuf, cmd))
         res = handle_option_command(cmd)
         if res[0] != -errno.ENOSYS:
             return res
@@ -323,6 +376,13 @@ class Module(MgrModule, SSLCherryPyConfig):
         elif cmd['prefix'] == 'dashboard create-self-signed-cert':
             self.create_self_signed_cert()
             return 0, 'Self-signed certificate created', ''
+        elif cmd['prefix'] in ('dashboard set-crt', 'dashboard set-key'):
+            self.set_store(cmd['prefix'][-3:], inbuf)
+            if self.server_state != CherryPyConfig.STATE_STOPPING:
+                logger.warning('Restarting Engine.')
+                self.server_state_event.set()
+            return 0, '{} saved.'.format(cmd['prefix'][-3:]), ''
+
 
         return (-errno.EINVAL, '', 'Command not found \'{0}\''
                 .format(cmd['prefix']))
@@ -353,20 +413,20 @@ class Module(MgrModule, SSLCherryPyConfig):
         NotificationQueue.new_notification(notify_type, notify_id)
 
 
-class StandbyModule(MgrStandbyModule, SSLCherryPyConfig):
+class StandbyModule(CherryPyConfig, MgrStandbyModule):
     def __init__(self, *args, **kwargs):
         super(StandbyModule, self).__init__(*args, **kwargs)
-        SSLCherryPyConfig.__init__(self)
-        self.shutdown_event = threading.Event()
 
         # We can set the global mgr instance to ourselves even though
         # we're just a standby, because it's enough for logging.
         mgr.init(self)
 
     def serve(self):
-        uri = self.await_configuration()
-        if uri is None:
-            # We were shut down while waiting
+        self.await_shutdown(self._serve)
+
+    def _serve(self):
+        self._configure()
+        if self.server_state == CherryPyConfig.STATE_STOPPING:
             return
 
         module = self
@@ -407,9 +467,3 @@ class StandbyModule(MgrStandbyModule, SSLCherryPyConfig):
         cherrypy.engine.stop()
         self.log.info("Engine stopped.")
 
-    def shutdown(self):
-        SSLCherryPyConfig.shutdown(self)
-
-        self.log.info("Stopping engine...")
-        self.shutdown_event.set()
-        self.log.info("Stopped engine...")

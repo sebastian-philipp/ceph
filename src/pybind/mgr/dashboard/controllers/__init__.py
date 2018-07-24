@@ -189,6 +189,7 @@ ENDPOINT_MAP = collections.defaultdict(list)
 
 
 def generate_controller_routes(endpoint, mapper, base_url):
+    ENDPOINT_MAP.clear()
     inst = endpoint.inst
     ctrl_class = endpoint.ctrl
     endp_base_url = None

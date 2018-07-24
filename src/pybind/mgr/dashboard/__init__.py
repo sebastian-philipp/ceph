@@ -6,7 +6,7 @@ openATTIC module
 from __future__ import absolute_import
 
 import os
-
+import logging
 
 if 'UNITTEST' not in os.environ:
     class _LoggerProxy(object):
@@ -35,9 +35,15 @@ if 'UNITTEST' not in os.environ:
     mgr = _ModuleProxy()
     logger = _LoggerProxy()
 
-    from .module import Module, StandbyModule
+    from .module import Module, StandbyModule, CPlusPlusHandler
+
+    logging.getLogger().setLevel(logging.DEBUG)
+    h = CPlusPlusHandler(mgr)
+    h.setLevel(logging.DEBUG)
+    logging.getLogger().addHandler(h)
+    logging.getLogger().setLevel(logging.DEBUG)
+
 else:
-    import logging
     logging.basicConfig(level=logging.DEBUG)
     logger = logging.getLogger(__name__)
     logging.root.handlers[0].setLevel(logging.DEBUG)

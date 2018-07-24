@@ -712,7 +712,7 @@ EOF
 
     # setting login credentials for dashboard
     if $with_mgr_dashboard; then
-        ceph_adm tell mgr dashboard ac-user-create admin admin administrator
+        ! ceph_adm tell mgr dashboard ac-user-create admin admin administrator
         if ! ceph_adm tell mgr dashboard create-self-signed-cert;  then
             echo dashboard module not working correctly!
         fi
