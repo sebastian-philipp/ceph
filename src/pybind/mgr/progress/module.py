@@ -1,4 +1,6 @@
-from mgr_module import MgrModule
+from typing import List, Dict, Union, Any, Optional
+
+from mgr_module import MgrModule, OSDMap
 import threading
 import datetime
 import uuid
@@ -9,7 +11,7 @@ import json
 ENCODING_VERSION = 1
 
 # keep a global reference to the module so we can use it from Event methods
-_module = None
+_module = None  # type: "Module"
 
 
 class Event(object):
@@ -20,32 +22,37 @@ class Event(object):
     """
 
     def __init__(self, message, refs):
+        # type: (str, List[str]) -> None
         self._message = message
         self._refs = refs
 
         self.started_at = datetime.datetime.utcnow()
 
-        self.id = None
+        self.id = None  # type: Optional[str]
 
     def _refresh(self):
         global _module
         _module.log.debug('refreshing mgr for %s (%s) at %f' % (self.id, self._message,
-                                                                self._progress))
-        _module.update_progress_event(self.id, self._message, self._progress)
+                                                                self.progress))
+        _module.update_progress_event(self.id, self._message, self.progress)
 
     @property
     def message(self):
+        # type: () -> str
         return self._message
 
     @property
     def refs(self):
+        # type: () -> List[str]
         return self._refs
 
     @property
     def progress(self):
+        # type: () -> float
         raise NotImplementedError()
 
     def summary(self):
+        # type: () -> str
         return "{0} {1}".format(self.progress, self._message)
 
     def _progress_str(self, width):
@@ -70,6 +77,7 @@ class Event(object):
             self._message, self._progress_str(30))
 
     def to_json(self):
+        # type: () -> Dict[str, Union[str, List, Optional[str]]]
         return {
             "id": self.id,
             "message": self.message,
@@ -84,6 +92,7 @@ class GhostEvent(Event):
     """
 
     def __init__(self, my_id, message, refs):
+        # type: (str, str, List[str]) -> None
         super(GhostEvent, self).__init__(message, refs)
         self.id = my_id
 
@@ -100,12 +109,14 @@ class RemoteEvent(Event):
     """
 
     def __init__(self, my_id, message, refs):
+        # type: (str, str, List) -> None
         super(RemoteEvent, self).__init__(message, refs)
         self.id = my_id
         self._progress = 0.0
         self._refresh()
 
     def set_progress(self, progress):
+        # type: (float) -> None
         self._progress = progress
         self._refresh()
 
@@ -123,6 +134,7 @@ class PgRecoveryEvent(Event):
     """
 
     def __init__(self, message, refs, which_pgs, evactuate_osds):
+        # type: (str, List[Any], List[PgId], List[str]) -> None
         super(PgRecoveryEvent, self).__init__(message, refs)
 
         self._pgs = which_pgs
@@ -131,7 +143,7 @@ class PgRecoveryEvent(Event):
 
         self._original_pg_count = len(self._pgs)
 
-        self._original_bytes_recovered = None
+        self._original_bytes_recovered = None  # type: Optional[Dict[PgId, float]]
 
         self._progress = 0.0
 
@@ -143,9 +155,10 @@ class PgRecoveryEvent(Event):
         return self. _evacuate_osds
 
     def pg_update(self, pg_dump, log):
+        # type: (Dict, Any) -> None
         # FIXME: O(pg_num) in python
         # FIXME: far more fields getting pythonized than we really care about
-        pg_to_state = dict([(p['pgid'], p) for p in pg_dump['pg_stats']])
+        pg_to_state = dict([(p['pgid'], p) for p in pg_dump['pg_stats']]) # type: Dict[str, Any]
 
         if self._original_bytes_recovered is None:
             self._original_bytes_recovered = {}
@@ -154,7 +167,7 @@ class PgRecoveryEvent(Event):
                 self._original_bytes_recovered[pg] = \
                     pg_to_state[pg_str]['stat_sum']['num_bytes_recovered']
 
-        complete_accumulate = 0.0
+        complete_accumulate = 0.0  # type: float
 
         # Calculating progress as the number of PGs recovered divided by the
         # original where partially completed PGs count for something
@@ -208,7 +221,7 @@ class PgRecoveryEvent(Event):
 
                     complete_accumulate += ratio
 
-        self._pgs = list(set(self._pgs) ^ complete)
+        self._pgs = list(set(self._pgs) ^ complete)  # type: List[PgId]
         completed_pgs = self._original_pg_count - len(self._pgs)
         self._progress = (completed_pgs + complete_accumulate)\
             / self._original_pg_count
@@ -220,11 +233,13 @@ class PgRecoveryEvent(Event):
 
     @property
     def progress(self):
+        # type: () -> float
         return self._progress
 
 
 class PgId(object):
     def __init__(self, pool_id, ps):
+        # type: (str, int) -> None
         self.pool_id = pool_id
         self.ps = ps
 
@@ -271,15 +286,15 @@ class Module(MgrModule):
     def __init__(self, *args, **kwargs):
         super(Module, self).__init__(*args, **kwargs)
 
-        self._events = {}
-        self._completed_events = []
+        self._events = {}  # type: Dict[str, Union[RemoteEvent, PgRecoveryEvent]]
+        self._completed_events = [] # type: List[GhostEvent]
 
-        self._old_osd_map = None
+        self._old_osd_map = None  # type: Optional[OSDMap]
 
         self._ready = threading.Event()
         self._shutdown = threading.Event()
 
-        self._latest_osdmap = None
+        self._latest_osdmap = None  # type: Optional[OSDMap]
 
         self._dirty = False
 
@@ -294,10 +309,11 @@ class Module(MgrModule):
             self.log.debug(' %s = %s', opt['name'], getattr(self, opt['name']))
 
     def _osd_out(self, old_map, old_dump, new_map, osd_id):
+        # type: (OSDMap, Dict, OSDMap, str) -> None
         affected_pgs = []
         unmoved_pgs = []
         for pool in old_dump['pools']:
-            pool_id = pool['pool']
+            pool_id = pool['pool']  # type: str
             for ps in range(0, pool['pg_num']):
                 up_acting = old_map.pg_to_up_acting_osds(pool['pool'], ps)
 
@@ -357,6 +373,7 @@ class Module(MgrModule):
         self._events[ev.id] = ev
 
     def _osd_in(self, osd_id):
+        # type: (str) -> None
         for ev_id, ev in self._events.items():
             if isinstance(ev, PgRecoveryEvent) and osd_id in ev.evacuating_osds:
                 self.log.info("osd.{0} came back in, cancelling event".format(
@@ -365,6 +382,7 @@ class Module(MgrModule):
                 self._complete(ev)
 
     def _osdmap_changed(self, old_osdmap, new_osdmap):
+        # type: (OSDMap, OSDMap) -> None
         old_dump = old_osdmap.dump()
         new_dump = new_osdmap.dump()
 
@@ -405,6 +423,7 @@ class Module(MgrModule):
                     self.maybe_complete(ev)
 
     def maybe_complete(self, event):
+        # type: (Event) -> None
         if event.progress >= 1.0:
             self._complete(event)
 
@@ -471,11 +490,12 @@ class Module(MgrModule):
         self.clear_all_progress_events()
 
     def update(self, ev_id, ev_msg, ev_progress):
+        # type: (str, str, float) -> None
         """
         For calling from other mgr modules
         """
         try:
-            ev = self._events[ev_id]
+            ev = self._events[ev_id]  # type: RemoteEvent
         except KeyError:
             ev = RemoteEvent(ev_id, ev_msg, [])
             self._events[ev_id] = ev
@@ -489,6 +509,7 @@ class Module(MgrModule):
         ev._refresh()
 
     def _complete(self, ev):
+        # type: (Event) -> None
         duration = (datetime.datetime.utcnow() - ev.started_at)
         self.log.info("Completed event {0} ({1}) in {2} seconds".format(
             ev.id, ev.message, duration.seconds

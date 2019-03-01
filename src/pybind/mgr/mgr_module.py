@@ -1,3 +1,4 @@
+from typing import Dict
 
 import ceph_module  # noqa
 
@@ -132,6 +133,7 @@ class HandleCommandResult(namedtuple('HandleCommandResult', ['retval', 'stdout',
 
 class OSDMap(ceph_module.BasePyOSDMap):
     def get_epoch(self):
+        # type: () -> int
         return self._get_epoch()
 
     def get_crush_version(self):
@@ -174,6 +176,7 @@ class OSDMap(ceph_module.BasePyOSDMap):
         return self._map_pool_pgs_up(poolid)
 
     def pg_to_up_acting_osds(self, pool_id, ps):
+        # type: (str, int) -> Dict[str, str]
         return self._pg_to_up_acting_osds(pool_id, ps)
 
     def pool_raw_used_rate(self, pool_id):
@@ -1047,6 +1050,7 @@ class MgrModule(ceph_module.BaseMgrModule):
         pass
 
     def get_osdmap(self):
+        # type: () -> OSDMap
         """
         Get a handle to an OSDMap.  If epoch==0, get a handle for the latest
         OSDMap.
