@@ -361,8 +361,31 @@ class RookCluster(object):
                 "Failed to update NFS server count for {0}: {1}".format(svc_id, e))
         return "Updated NFS server count for {0} to {1}".format(svc_id, newcount)
 
+    def drive_group_to_store_config(self, drive_group):
+        # type: (orchestrator.DriveGroupSpec) -> dict
+        """
+        As of Rook 1.0
+
+        See pkg/operator/ceph/cluster/osd/config/config.go:49
+
+        type StoreConfig struct {
+            StoreType       string `json:"storeType,omitempty"`
+            WalSizeMB       int    `json:"walSizeMB,omitempty"`
+            DatabaseSizeMB  int    `json:"databaseSizeMB,omitempty"`
+            JournalSizeMB   int    `json:"journalSizeMB,omitempty"`
+            OSDsPerDevice   int    `json:"osdsPerDevice,omitempty"`
+            EncryptedDevice bool   `json:"encryptedDevice,omitempty"`
+        }
+        """
+        config = {"storeType": drive_group.objectstore}
+        if drive_group.encrypted:
+            config["encryptedDevice"] = drive_group.encrypted
+        if drive_group.osds_per_device:
+            config["osdsPerDevice"] = drive_group.osds_per_device
+        return config
+
     def add_osds(self, drive_group, all_hosts):
-        # type: (orchestrator.DriveGroupSpec, List[str]) -> None
+        # type: (orchestrator.DriveGroupSpec, List[str]) -> str
         """
         Rook currently (0.8) can only do single-drive OSDs, so we
         treat all drive groups as just a list of individual OSDs.
@@ -398,7 +421,7 @@ class RookCluster(object):
 
         if drive_group.hosts(all_hosts)[0] not in [n['name'] for n in current_nodes]:
             pd = { "name": drive_group.hosts(all_hosts)[0],
-                   "config": { "storeType": drive_group.objectstore }}
+                   "config": self.drive_group_to_store_config(drive_group)}
 
             if block_devices:
                 pd["devices"] = [{'name': d} for d in block_devices]

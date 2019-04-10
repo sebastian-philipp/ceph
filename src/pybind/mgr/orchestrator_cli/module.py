@@ -2,7 +2,7 @@ import errno
 import json
 
 try:
-    from typing import Dict, List
+    from typing import Dict, List, Optional
 except ImportError:
     pass  # just for type checking.
 
@@ -156,10 +156,12 @@ class OrchestratorCli(orchestrator.OrchestratorClientMixin, MgrModule):
             return HandleCommandResult(stdout="\n".join(lines))
 
     @_write_cli('orchestrator osd create',
-                "name=svc_arg,type=CephString,req=false",
+                "name=svc_arg,type=CephString,req=false "
+                "name=osds_per_device,type=CephInt,req=false "
+                "name=encrypted,type=CephBool,req=false",
                 'Create an OSD service. Either --svc_arg=host:drives or -i <drive_group>')
-    def _create_osd(self, svc_arg=None, inbuf=None):
-        # type: (str, str) -> HandleCommandResult
+    def _create_osd(self, svc_arg=None, inbuf=None, osds_per_device=None, encrypted=None):
+        # type: (Optional[str], Optional[str], Optional[int], Optional[bool]) -> HandleCommandResult
         """Create one or more OSDs"""
 
         usage = """
@@ -184,7 +186,9 @@ Usage:
                 return HandleCommandResult(-errno.EINVAL, stderr=msg)
 
             devs = orchestrator.DeviceSelection(paths=block_devices)
-            drive_group = orchestrator.DriveGroupSpec(node_name, data_devices=devs)
+            drive_group = orchestrator.DriveGroupSpec(node_name, data_devices=devs,
+                                                      osds_per_device=osds_per_device,
+                                                      encrypted=encrypted)
         else:
             return HandleCommandResult(-errno.EINVAL, stderr=usage)
 
