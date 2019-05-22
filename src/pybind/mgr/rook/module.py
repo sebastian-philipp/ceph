@@ -329,7 +329,7 @@ class RookOrchestrator(MgrModule, orchestrator.Orchestrator):
         return result
 
     @deferred_read
-    def describe_service(self, service_type=None, service_id=None, node_name=None):
+    def describe_service(self, service_type=None, service_id=None, node_name=None, refresh=False):
 
         assert service_type in ("mds", "osd", "mgr", "mon", "nfs", None), service_type + " unsupported"
 
