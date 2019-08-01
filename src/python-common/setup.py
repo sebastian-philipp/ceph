@@ -13,7 +13,7 @@ setup(
     url="https://github.com/ceph/ceph",
     zip_safe = False,
     install_requires=(
-        'six',
+        'six', 'docopt',
     ),
     tests_require=[
         'pytest >=2.1.3',
@@ -27,5 +27,10 @@ setup(
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
-    ]
+    ],
+    entry_points = {
+        'console_scripts': [
+            'ceph-daemon = ceph.deployment.daemon:main',
+    ],
+}
 )
