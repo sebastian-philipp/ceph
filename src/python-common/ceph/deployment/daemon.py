@@ -2,10 +2,10 @@
 
 Usage:
   ceph-daemon bootstrap [--mon-name=name] [--fsid=fsid] [options]
-  ceph-daemon create_initial_keyring [options]
   ceph-daemon deploy mon [--mon-name=name] [options]
   ceph-daemon deploy mgr <name> [options]
   ceph-daemon version [options]
+  ceph-daemon ceph [--] [<args>...]
   ceph-daemon --version
 
 Options:
@@ -30,6 +30,8 @@ def main():
     image = args['--image']
     if args['version']:
         ssh_orchestrator.get_ceph_version(image)
+    if args['ceph']:
+        ssh_orchestrator.ceph_cli(image, args['<args>'])
     elif args['bootstrap']:
         ssh_orchestrator.bootstrap_cluster(image=image,
                                            fsid=args['--fsid'],

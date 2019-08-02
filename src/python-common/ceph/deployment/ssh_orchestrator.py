@@ -19,9 +19,10 @@ Bootstrap MON TODOs:
 
 import os
 import logging
+import sys
 from distutils.spawn import find_executable
 from os.path import expanduser
-from subprocess import check_output
+from subprocess import check_output, CalledProcessError
 from typing import List, Dict, Sequence
 
 from attr import dataclass
@@ -29,12 +30,13 @@ from attr import dataclass
 logger = logging.getLogger(__name__)
 
 @dataclass
-class PodmanContainer(object):
+class CephContainer(object):
     image: str
     entrypoint: str
     args: List[str]
     volume_mounts: Dict[str, str]
     name: str = None
+    podman_args: List[str] = []
 
     @property
     def run_cmd(self):
@@ -47,7 +49,7 @@ class PodmanContainer(object):
             'run',
             '--rm',
             '--net=host',
-            ] + name + envs + vols + [
+            ] + self.podman_args + name + envs + vols + [
             '--entrypoint', f'/usr/bin/{self.entrypoint}',
             self.image
         ] + self.args
@@ -58,7 +60,23 @@ class PodmanContainer(object):
 
 
 def get_ceph_version(image):
-    PodmanContainer(image, 'ceph', ['--version']).run()
+    CephContainer(image, 'ceph', ['--version']).run()
+
+def ceph_cli(image, args):
+    try:
+        CephContainer(image,
+                      entrypoint='ceph',
+                      args=args,
+                      volume_mounts={
+                          '/var/lib/ceph': '/var/lib/ceph:z',
+                          '/var/run/ceph': '/var/run/ceph:z',
+                          '/etc/localtime': '/etc/localtime:ro',
+                          '/var/log/ceph': '/var/log/ceph:z'
+                      },
+                      ).run()
+    except CalledProcessError as e:
+        logger.info(f'{e}')
+        sys.exit(1)
 
 def bootstrap_cluster(image, fsid=None, mon_name=None, cluster_addr=None, public_addr=None, uid=0, gid=0):
     fsid = fsid or make_fsid()
@@ -68,7 +86,8 @@ def bootstrap_cluster(image, fsid=None, mon_name=None, cluster_addr=None, public
 
     mon_keyring_path = create_initial_keyring(image)
     create_mon(image, mon_keyring_path, fsid, mon_name=mon_name, uid=uid, gid=gid)
-    start_mon(image, fsid, mon_name, mon_keyring_path, cluster_addr, public_addr, uid, gid)
+    start_mon(image, fsid, mon_name, mon_keyring_path, cluster_addr, public_addr,
+              mon_initial_members=mon_name, uid=uid, gid=gid)
 
     create_mgr()
 
@@ -78,7 +97,7 @@ def create_initial_keyring(image):
 
     makedirs(mon_keyring_path)
 
-    PodmanContainer(
+    CephContainer(
         image=image,
         entrypoint='ceph-authtool',
         args=f'--create-keyring {mon_keyring} --gen-key -n mon.'.split(),
@@ -92,7 +111,7 @@ def create_mon(image, mon_keyring_path, fsid, mon_name, uid=0, gid=0):
     mon_path = f"/var/lib/ceph/mon/ceph-{mon_name}"
     makedirs(mon_path)
 
-    PodmanContainer(
+    CephContainer(
         image=image,
         entrypoint='ceph-mon',
         args=['--mkfs',
@@ -103,9 +122,10 @@ def create_mon(image, mon_keyring_path, fsid, mon_name, uid=0, gid=0):
         volume_mounts={'/var/lib/ceph/': '/var/lib/ceph'}
     ).run()
 
-def start_mon(image, fsid, mon_name, mon_keyring_path, cluster_addr, public_addr, uid=0, gid=0):
+def start_mon(image, fsid, mon_name, mon_keyring_path, cluster_addr, public_addr,
+              mon_initial_members=None, uid=0, gid=0):
     makedirs('/var/run/ceph')
-    mon_container = PodmanContainer(
+    mon_container = CephContainer(
         image=image,
         entrypoint='ceph-mon',
         args=['-i', mon_name,
@@ -113,7 +133,9 @@ def start_mon(image, fsid, mon_name, mon_keyring_path, cluster_addr, public_addr
               '--keyring', mon_keyring_path,
               f'--cluster_addr={cluster_addr}',
               f'--public_addr={public_addr}',
-              '-f' # foreground
+              f'--mon_initial_members={mon_name}',
+              '-f', # foreground
+              '-d' # log to stderr
               ] + user_args(uid, gid),
         volume_mounts={
             '/var/lib/ceph': '/var/lib/ceph:z',
@@ -121,7 +143,7 @@ def start_mon(image, fsid, mon_name, mon_keyring_path, cluster_addr, public_addr
             '/etc/localtime': '/etc/localtime:ro',
             '/var/log/ceph': '/var/log/ceph:z'
         },
-        name='ceph-mon-%i'
+        name='ceph-mon-%i',
     )
     unit_path = expanduser('~/.config/systemd/user')  # TODO: use system-wide location
     makedirs(unit_path)
@@ -133,6 +155,7 @@ After=network.target
 
 [Service]
 EnvironmentFile=-/etc/environment
+ExecStartPre=-/usr/bin/podman rm ceph-mon-%i
 ExecStart={' '.join(mon_container.run_cmd)}
 ExecStop=-/usr/bin/podman stop ceph-mon-%i
 ExecStopPost=-/bin/rm -f /var/run/ceph/ceph-mon.%i.asok
@@ -147,6 +170,7 @@ WantedBy=multi-user.target
     check_output(['systemctl', '--user', 'disable', f'ceph-mon@{mon_name}.service'])
     check_output(['systemctl', '--user', 'enable', f'ceph-mon@{mon_name}.service'])
     check_output(['systemctl', '--user', 'start', f'ceph-mon@{mon_name}.service'])
+    logger.info(f'See > journalctl --user -f -u ceph-mon@{mon_name}.service')
 
 def create_mgr():
     pass
