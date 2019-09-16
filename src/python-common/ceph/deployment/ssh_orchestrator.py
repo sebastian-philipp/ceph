@@ -176,10 +176,11 @@ TimeoutStopSec=15
 [Install]
 WantedBy=multi-user.target
 """)
-    check_output(['systemctl', '--user', 'disable', f'ceph-mon@{mon_name}.service'])
-    check_output(['systemctl', '--user', 'enable', f'ceph-mon@{mon_name}.service'])
-    check_output(['systemctl', '--user', 'start', f'ceph-mon@{mon_name}.service'])
-    logger.info(f'See > journalctl --user -f -u ceph-mon@{mon_name}.service')
+
+    check_output(['systemctl', 'disable', f'ceph-mon@{mon_name}.service'])
+    check_output(['systemctl', 'enable', f'ceph-mon@{mon_name}.service'])
+    check_output(['systemctl', 'start', f'ceph-mon@{mon_name}.service'])
+    logger.info(f'See > journalctl -f -u ceph-mon@{mon_name}.service')
 
 def create_mgr():
     pass
