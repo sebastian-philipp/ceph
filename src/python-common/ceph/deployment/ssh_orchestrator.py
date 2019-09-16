@@ -68,6 +68,7 @@ def ceph_cli(image, args):
                       entrypoint='ceph',
                       args=args,
                       volume_mounts={
+                          '/etc/ceph': '/etc/ceph:z',
                           '/var/lib/ceph': '/var/lib/ceph:z',
                           '/var/run/ceph': '/var/run/ceph:z',
                           '/etc/localtime': '/etc/localtime:ro',
@@ -78,18 +79,27 @@ def ceph_cli(image, args):
         logger.info(f'{e}')
         sys.exit(1)
 
-def bootstrap_cluster(image, fsid=None, mon_name=None, cluster_addr=None, public_addr=None, uid=0, gid=0):
+def bootstrap_cluster(image, fsid=None, mon_name=None, mon_addr=None, uid=0, gid=0):
     fsid = fsid or make_fsid()
     mon_name = mon_name or get_hostname()
-    assert cluster_addr, 'TODO: make proper default'
-    assert public_addr, 'TODO: make proper default'
+    assert mon_addr, 'TODO: make proper default'
 
+    write_ceph_conf(fsid, [mon_name], [mon_addr], [mon_name])
     mon_keyring_path = create_initial_keyring(image)
     create_mon(image, mon_keyring_path, fsid, mon_name=mon_name, uid=uid, gid=gid)
-    start_mon(image, fsid, mon_name, mon_keyring_path, cluster_addr, public_addr,
-              mon_initial_members=mon_name, uid=uid, gid=gid)
+    start_mon(image, mon_name, mon_keyring_path, uid=uid, gid=gid)
 
     create_mgr()
+
+def write_ceph_conf(fsid, mon_hosts: List[str], mon_addrs: List[str], mon_initial_members: List[str]):
+    with open('/etc/ceph/ceph.conf', 'w') as f:
+        f.write(f"""[global]
+        fsid = {fsid}
+[mon]
+        mon host = {','.join(mon_hosts)}
+        mon addr = {','.join(mon_addrs)}
+        mon initial members = {','.join(mon_initial_members)}
+""")
 
 def create_initial_keyring(image):
     mon_keyring_path = '/var/lib/ceph/tmp'
@@ -101,7 +111,10 @@ def create_initial_keyring(image):
         image=image,
         entrypoint='ceph-authtool',
         args=f'--create-keyring {mon_keyring} --gen-key -n mon.'.split(),
-        volume_mounts={'/var/lib/ceph/': '/var/lib/ceph'}
+        volume_mounts={
+            '/etc/ceph': '/etc/ceph:z',
+            '/var/lib/ceph/': '/var/lib/ceph'
+        }
     ).run()
 
     logger.info(f'{mon_keyring} created')
@@ -122,22 +135,18 @@ def create_mon(image, mon_keyring_path, fsid, mon_name, uid=0, gid=0):
         volume_mounts={'/var/lib/ceph/': '/var/lib/ceph'}
     ).run()
 
-def start_mon(image, fsid, mon_name, mon_keyring_path, cluster_addr, public_addr,
-              mon_initial_members=None, uid=0, gid=0):
+def start_mon(image, mon_name, mon_keyring_path, uid=0, gid=0):
     makedirs('/var/run/ceph')
     mon_container = CephContainer(
         image=image,
         entrypoint='ceph-mon',
         args=['-i', mon_name,
-              '--fsid', fsid,
               '--keyring', mon_keyring_path,
-              f'--cluster_addr={cluster_addr}',
-              f'--public_addr={public_addr}',
-              f'--mon_initial_members={mon_name}',
               '-f', # foreground
               '-d' # log to stderr
               ] + user_args(uid, gid),
         volume_mounts={
+            '/etc/ceph': '/etc/ceph:z',
             '/var/lib/ceph': '/var/lib/ceph:z',
             '/var/run/ceph': '/var/run/ceph:z',
             '/etc/localtime': '/etc/localtime:ro',
