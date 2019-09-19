@@ -546,3 +546,19 @@ class RookCluster(object):
                 "Failed to update {}/{}: {}".format(crd_name, cr_name, e))
 
         return "Success"
+
+    def delete_device(self, hostname, device_name):
+        def _delete_device(current_cluster, new_cluster):
+            # type: (ccl.CephCluster, ccl.CephCluster) -> ccl.CephCluster
+            found = False
+
+            for n in new_cluster.spec.storage.nodes:
+                if n.name == hostname:
+                    [device] = [d for d in n.devices if d.name == device_name]
+                    n.devices.remove(device)
+                    found = True
+            if not found:
+                raise Exception('{}:{} not found'.format(hostname, device_name))
+            return new_cluster
+
+        return self._patch(ccl.CephCluster, 'cephclusters', self.rook_env.cluster_name, _delete_device)

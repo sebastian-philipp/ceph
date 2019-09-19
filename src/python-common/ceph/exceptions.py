@@ -1,3 +1,6 @@
+import errno
+
+
 class Error(Exception):
     """ `Error` class, derived from `Exception` """
     def __init__(self, message, errno=None):
@@ -85,3 +88,31 @@ class LogicError(Error):
 class TimedOut(OSError):
     """ `TimedOut` class, derived from `OSError` """
     pass
+
+errno_to_exception = {
+        errno.EPERM     : PermissionError,
+        errno.ENOENT    : ObjectNotFound,
+        errno.EIO       : IOError,
+        errno.ENOSPC    : NoSpace,
+        errno.EEXIST    : ObjectExists,
+        errno.EBUSY     : ObjectBusy,
+        errno.ENODATA   : NoData,
+        errno.EINTR     : InterruptedOrTimeoutError,
+        errno.ETIMEDOUT : TimedOut,
+        errno.EACCES    : PermissionDeniedError,
+        errno.EINVAL    : InvalidArgumentError,
+    }
+
+
+def make_ex(ret, msg):
+    """
+    Translate a librados return code into an exception.
+
+    :param ret: the return code
+    :type ret: int
+    :param msg: the error message to use
+    :type msg: str
+    :returns: a subclass of :class:`Error`
+    """
+    ret = abs(ret)
+    return errno_to_exception.get(ret, OSError)(msg, errno=ret)

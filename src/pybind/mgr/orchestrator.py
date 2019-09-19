@@ -125,6 +125,8 @@ def raise_if_exception(c):
         if id(my_cls) == id(r_cls):
             return r_obj
         my_obj = my_cls.__new__(my_cls)
+        if issubclass(my_cls, Exception):
+            my_obj.args = copy_to_this_subinterpreter(r_obj.args)
         for k,v in r_obj.__dict__.items():
             setattr(my_obj, k, copy_to_this_subinterpreter(v))
         return my_obj

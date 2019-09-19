@@ -1,7 +1,11 @@
+import json
 import threading
 import functools
 import os
+import time
 import uuid
+
+from ceph.exceptions import make_ex, ObjectNotFound, InvalidArgumentError
 
 try:
     from typing import List, Dict
@@ -26,7 +30,7 @@ except ImportError:
     client = None
     config = None
 
-from mgr_module import MgrModule
+from mgr_module import MgrModule, CLIWriteCommand, HandleCommandResult
 import orchestrator
 
 from .rook_cluster import RookCluster
@@ -490,3 +494,101 @@ class RookOrchestrator(MgrModule, orchestrator.Orchestrator):
                                    "Creating OSD on {0}:{1}".format(
                                        drive_group.hosts(all_hosts)[0], targets
                                    ))
+
+
+    def _remove_osds(self, osd_ids, destroy=False):
+        [osd_id] = osd_ids
+        _osd, raw_id = osd_id.split('.')
+        assert destroy is False
+
+        def get_device_name():
+            metadata = self.get_metadata('osd', str(raw_id))
+            if not metadata:
+                raise orchestrator.OrchestratorValidationError('OSD {} not found'.format(osd_id))
+            [device_name] = metadata['devices'].split(',')
+            return device_name
+
+        def get_hostname():
+            [pod] = self.rook_cluster.describe_pods('osd', raw_id)
+            return pod['nodename']
+        return self._remove_osd_2(
+            osd_id,
+            destroy,
+            get_hostname(),
+            get_device_name()
+        )
+
+
+    @CLIWriteCommand("rook osd rm",
+                     "name=osd_id,type=CephString "
+                     "name=destroy,type=CephBool "
+                     "name=hostname,type=CephString "
+                     "name=device_name,type=CephString")
+    def _remove_osd_2(self, osd_id, destroy, hostname, device_name):
+        _osd, raw_id = osd_id.split('.')
+        assert destroy is False
+
+        def drain():
+            cmd = {
+                'prefix': 'osd crush reweight',
+                'name': osd_id,
+                'weight': 0.0
+            }
+            status, out, err = self.mon_command(cmd)
+            if status != 0:
+                raise make_ex(-status, 'osd crush reweight failed: {}'.format(err))
+
+        def is_osd_empty():
+            cmd = {'prefix': 'pg ls-by-osd', 'osd': osd_id}
+            status, out, err = self.mon_command(cmd)
+            if status != 0:
+                raise make_ex(-status, 'pg ls-by-osd failed: {}'.format(err))
+            return not len(json.loads(out))
+
+        def osd_out():
+            cmd = {
+                'prefix': 'osd out',
+                'ids': [osd_id],
+            }
+            status, out, err = self.mon_command(cmd)
+            if status != 0:
+                raise make_ex(-status, 'osd out failed: {}'.format(err))
+
+        def purge():
+            cmd = {
+                'prefix': "osd purge",
+                'id': osd_id,
+            }
+            status, out, err = self.mon_command(cmd)
+            if status != 0:
+                raise make_ex(-status, 'osd purge failed: {}'.format(err) + str(cmd))
+
+        def make_osd_empty():
+            """!= ceph safe-to-stop"""
+            try:
+                drain()
+                while not is_osd_empty():
+                    time.sleep(10)
+            except ObjectNotFound:
+                pass
+
+        make_osd_empty()
+        if destroy:
+            # right now, we're using the destroy flag.
+            # do we need a replace flag ???
+            # osd_destroy(osd_id)
+            return HandleCommandResult(stdout='todo')
+        else:
+            osd_out()
+            try:
+                purge()
+            except InvalidArgumentError:
+                pass
+            # Now, Rook should take over and delete the Deployments etc.
+            # TODO: wait till pod is gone
+            return HandleCommandResult(stdout=self.rook_cluster.delete_device(hostname, device_name))
+
+    def remove_osds(self, osd_ids, destroy=False):
+        return RookWriteCompletion(
+            lambda: self._remove_osds(osd_ids, destroy).stdout, None,
+                "Removing OSD {}".format(osd_ids))

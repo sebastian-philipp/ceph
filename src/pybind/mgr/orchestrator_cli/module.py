@@ -24,7 +24,7 @@ def handle_exception(prefix, cmd_args, desc, perm, func):
             return func(*args, **kwargs)
         except (orchestrator.OrchestratorError, ImportError) as e:
             # Do not print Traceback for expected errors.
-            return HandleCommandResult(-errno.ENOENT, stderr=str(e))
+            return HandleCommandResult(-errno.ENOENT, stderr='Validation Error:' + str(e))
         except NotImplementedError:
             msg = 'This Orchestrator does not support `{}`'.format(prefix)
             return HandleCommandResult(-errno.ENOENT, stderr=msg)
