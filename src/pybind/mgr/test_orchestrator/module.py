@@ -180,7 +180,10 @@ class TestOrchestrator(MgrModule, orchestrator.Orchestrator):
 
         return result
 
-    def create_osds(self, drive_group):
+    def create_osds(self, drive_groups):
+        # type: (List[orchestrator.DriveGroupSpec]) -> orchestrator.Completion
+        assert len(drive_groups) == 1
+        [drive_group] = drive_groups
         def run(all_hosts):
             drive_group.validate(orchestrator.InventoryNode.get_host_names(all_hosts))
         return self.get_hosts().then(run).then(

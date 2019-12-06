@@ -868,8 +868,8 @@ class Orchestrator(object):
         #assert not (service_name and service_id)
         raise NotImplementedError()
 
-    def create_osds(self, drive_group):
-        # type: (DriveGroupSpec) -> Completion
+    def create_osds(self, drive_groups):
+        # type: (List[DriveGroupSpec]) -> Completion
         """
         Create one or more OSDs within a single Drive Group.
 

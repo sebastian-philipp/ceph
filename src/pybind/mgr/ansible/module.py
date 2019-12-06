@@ -348,7 +348,8 @@ class Module(MgrModule, orchestrator.Orchestrator):
 
         return op
 
-    def create_osds(self, drive_group):
+    def create_osds(self, drive_groups):
+        # type: (List[orchestrator.DriveGroupSpec]) -> orchestrator.Completion
         """Create one or more OSDs within a single Drive Group.
         If no host provided the operation affects all the host in the OSDS role
 
@@ -356,7 +357,8 @@ class Module(MgrModule, orchestrator.Orchestrator):
         :param drive_group: (ceph.deployment.drive_group.DriveGroupSpec),
                             Drive group with the specification of drives to use
         """
-
+        assert len(drive_groups) == 1
+        [drive_group] = drive_groups
         # Transform drive group specification to Ansible playbook parameters
         host, osd_spec = dg_2_ansible(drive_group)
 
