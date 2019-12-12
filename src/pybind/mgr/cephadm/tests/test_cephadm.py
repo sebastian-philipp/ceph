@@ -33,6 +33,11 @@ def _run_cephadm(ret):
 def mon_command(*args, **kwargs):
     return 0, '', ''
 
+def mon_command_ret(ret):
+    def mon_command(*args, **kwargs):
+        return 0, ret, ''
+    return mon_command
+
 
 class TestSSH(object):
     def _wait(self, m, c):
@@ -172,3 +177,35 @@ class TestSSH(object):
         with self._with_host(cephadm_module, 'test'):
             c = cephadm_module.blink_device_light('ident', True, [('test', '')])
             assert self._wait(cephadm_module, c) == ['Set ident light for test: on']
+
+    @mock.patch("cephadm.module.CephadmOrchestrator._run_cephadm", _run_cephadm(['image,1.2.3']))
+    @mock.patch("cephadm.module.CephadmOrchestrator._get_connection")
+    def test_upgrade_start(self, _get_connection, cephadm_module):
+        with self._with_host(cephadm_module, 'test'):
+            c = cephadm_module.upgrade_start('image_id', None)
+            assert self._wait(cephadm_module, c) == 'Initiating upgrade to image_id image'
+
+            c = cephadm_module.upgrade_status()
+            assert self._wait(cephadm_module, c).target_image == 'image_id'
+
+            c = cephadm_module.upgrade_pause()
+            assert self._wait(cephadm_module, c) == 'Paused upgrade to image_id'
+
+    @mock.patch("cephadm.module.CephadmOrchestrator._run_cephadm", _run_cephadm(['image,1.2.3']))
+    @mock.patch("cephadm.module.CephadmOrchestrator.send_command")
+    @mock.patch("cephadm.module.CephadmOrchestrator.mon_command", mon_command_ret('{}'))
+    @mock.patch("cephadm.module.CephadmOrchestrator._get_connection")
+    def test__do_upgrade(self, _send_command, _get_connection, cephadm_module):
+        with self._with_host(cephadm_module, 'test'):
+            c = cephadm_module.upgrade_start('image_id', None)
+            assert self._wait(cephadm_module, c) == 'Initiating upgrade to image_id image'
+
+            c = cephadm_module._do_upgrade([ServiceDescription(
+                nodename='test',
+                service='rgw',
+                service_instance='myrgw.foobar',
+                service_type='rgw',
+            )])
+            assert c is not None
+            assert self._wait(cephadm_module, c) == ["(Re)deployed rgw.myrgw.foobar on host 'test'"]
+

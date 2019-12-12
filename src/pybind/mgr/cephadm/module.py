@@ -1,6 +1,7 @@
 import json
 import errno
 import logging
+import time
 from threading import Event
 from functools import wraps
 
@@ -230,7 +231,7 @@ def trivial_result(val):
     return AsyncCompletion(value=val, name='trivial_result')
 
 
-class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
+class CephadmOrchestrator(MgrModule, orchestrator.Orchestrator):
 
     _STORE_HOST_PREFIX = "host"
 
@@ -348,9 +349,10 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
         self.event.set()
 
     def _do_upgrade(self, daemons):
+        # type: (List[orchestrator.ServiceDescription]) -> Optional[AsyncCompletion]
         if not self.upgrade_state:
             self.log.debug('_do_upgrade no state, exiting')
-            return
+            return None
 
         target_name = self.upgrade_state.get('target_name')
         target_id = self.upgrade_state.get('target_id')
@@ -379,11 +381,11 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
                         })
                         if err:
                             self.log.info('Upgrade: not safe to stop %s.%s' %
-                                          daemon_type, s.service_instance)
+                                          (daemon_type, d.service_instance))
                             time.sleep(10)
                         else:
                             self.log.info('Upgrade: safe to stop %s.%s' %
-                                          daemon_type, s.service_instance)
+                                          (daemon_type, d.service_instance))
                             break
 
                     self.log.info('Upgrade: Redeploying %s.%s' %
@@ -394,10 +396,12 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
                         'value': target_name,
                         'who': daemon_type + '.' + d.service_instance,
                     })
-                    return self._service_action(d.service_type,
-                                                d.service_instance,
-                                                d.nodename,
-                                                'redeploy')
+                    return self._service_action([(
+                        d.service_type,
+                        d.service_instance,
+                        d.nodename,
+                        'redeploy'
+                    )])
 
             if need_upgrade_self:
                 mgr_map = self.get('mgr_map')
@@ -408,7 +412,7 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
                         'suspending upgrade')
                     self.upgrade_state['error'] = 'No standby mgrs and mgr.%s ' \
                         'needs to be upgraded' % self.get_mgr_id()
-                    return
+                    return None
 
                 self.log.info('Upgrade: there are %d other already-upgraded '
                               'standby mgrs, failing over' % num)
@@ -418,7 +422,7 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
                     'prefix': 'mgr fail',
                     'who': self.get_mgr_id(),
                 })
-                return
+                return None
 
             # make sure 'ceph versions' agrees
             ret, out, err = self.mon_command({
@@ -470,8 +474,10 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
         self.log.info('Upgrade: Complete!')
         self.upgrade_state = None
         self._save_upgrade_state()
+        return None
 
     def serve(self):
+        # type: () -> None
         self.log.info("serve starting")
         while self.run:
             while self.upgrade_state and not self.upgrade_state.get('paused'):
@@ -482,7 +488,17 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
                 self.log.debug('services %s' % completion.result)
                 completion = self._do_upgrade(completion.result)
                 if completion:
-                    self._orchestrator_wait([completion])
+                    while not completion.has_result:
+                        self.process([completion])
+                        if completion.needs_result:
+                            time.sleep(1)
+                        else:
+                            break
+
+
+                    client = orchestrator.OrchestratorClientMixin()
+                    client.set_mgr(self.mgr)
+                    client._orchestrator_wait([completion])
                     orchestrator.raise_if_exception(completion)
                 self.log.debug('did _do_upgrade')
 
@@ -1004,7 +1020,7 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
             service_name=service_name,
             service_id=service_id).then(_proc_daemons)
 
-#    @async_map_completion
+    @async_map_completion
     def _service_action(self, service_type, service_id, host, action):
         self.log.debug('_service_action')
         if action == 'redeploy':
@@ -1233,7 +1249,7 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
                 stdin=j)
             self.log.debug('create_daemon code %s out %s' % (code, out))
             self.service_cache.invalidate(host)
-            return trivial_result("(Re)deployed {} on host '{}'".format(name, host))
+            return "(Re)deployed {} on host '{}'".format(name, host)
 
         except Exception as e:
             self.log.error("create_daemon({}): error: {}".format(host, e))

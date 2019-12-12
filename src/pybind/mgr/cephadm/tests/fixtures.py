@@ -41,6 +41,7 @@ def cephadm_module():
             'ssh_identity_key': '',
             'ssh_identity_pub': '',
             'inventory': {},
+            'upgrade_state': '',
         }
         m.__init__('cephadm', 0, 0)
         yield m
