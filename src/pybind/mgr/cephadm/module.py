@@ -1004,8 +1004,9 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
             service_name=service_name,
             service_id=service_id).then(_proc_daemons)
 
-    @async_map_completion
+#    @async_map_completion
     def _service_action(self, service_type, service_id, host, action):
+        self.log.debug('_service_action')
         if action == 'redeploy':
             # recreate the systemd unit and then restart
             if service_type == 'mon':
@@ -1019,6 +1020,7 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
                     'prefix': 'auth get',
                     'entity': '%s.%s' % (service_type, service_id),
                 })
+            self.log.debug('got keyring')
             return self._create_daemon(service_type, service_id, host,
                                        keyring)
 
@@ -1199,6 +1201,7 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
 
     def _create_daemon(self, daemon_type, daemon_id, host, keyring,
                        extra_args=[]):
+        self.log.debug('_create_daemon')
         conn = self._get_connection(host)
         try:
             name = '%s.%s' % (daemon_type, daemon_id)
@@ -1230,7 +1233,7 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
                 stdin=j)
             self.log.debug('create_daemon code %s out %s' % (code, out))
             self.service_cache.invalidate(host)
-            return "(Re)deployed {} on host '{}'".format(name, host)
+            return trivial_result("(Re)deployed {} on host '{}'".format(name, host))
 
         except Exception as e:
             self.log.error("create_daemon({}): error: {}".format(host, e))
