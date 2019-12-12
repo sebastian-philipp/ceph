@@ -1,6 +1,7 @@
 import json
 import errno
 import logging
+from threading import Event
 from functools import wraps
 
 import string
@@ -229,7 +230,7 @@ def trivial_result(val):
     return AsyncCompletion(value=val, name='trivial_result')
 
 
-class CephadmOrchestrator(MgrModule, orchestrator.Orchestrator):
+class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
 
     _STORE_HOST_PREFIX = "host"
 
@@ -289,6 +290,13 @@ class CephadmOrchestrator(MgrModule, orchestrator.Orchestrator):
         self._reconfig_ssh()
 
         CephadmOrchestrator.instance = self
+
+        t = self.get_store('upgrade_state')
+        if t:
+            self.upgrade_state = json.loads(t)
+        else:
+            self.upgrade_state = None
+
         self.all_progress_references = list()  # type: List[orchestrator.ProgressReference]
 
         # load inventory
@@ -324,10 +332,165 @@ class CephadmOrchestrator(MgrModule, orchestrator.Orchestrator):
             if h not in self.inventory:
                 del self.service_cache[h]
 
+        # for serve()
+        self.run = True
+        self.event = Event()
+
     def shutdown(self):
         self.log.error('shutdown')
         self._worker_pool.close()
         self._worker_pool.join()
+        self.run = False
+        self.event.set()
+
+    def _kick_serve_loop(self):
+        self.log.debug('_kick_serve_loop')
+        self.event.set()
+
+    def _do_upgrade(self, daemons):
+        if not self.upgrade_state:
+            self.log.debug('_do_upgrade no state, exiting')
+            return
+
+        target_name = self.upgrade_state.get('target_name')
+        target_id = self.upgrade_state.get('target_id')
+        target_version = self.upgrade_state.get('target_version')
+        self.log.info('Upgrade: Target is %s id %s' % (target_name, target_id))
+
+        for daemon_type in ['mgr', 'mon', 'osd', 'rgw', 'mds']:
+            self.log.info('Upgrade: Checking %s daemons...' % daemon_type)
+            need_upgrade_self = False
+            for d in daemons:
+                if d.service_type != daemon_type:
+                    continue
+                if daemon_type == 'mgr' and \
+                   d.service_instance == self.get_mgr_id():
+                    self.log.info('Upgrade: Need to upgrade myself (mgr.%s)' %
+                                  self.get_mgr_id())
+                    need_upgrade_self = True
+                    continue
+                if d.container_image_id != target_id:
+                    while True:
+                        if daemon_type not in ['mon', 'osd', 'mds']:
+                            break
+                        ret, out, err = self.mon_command({
+                            'prefix': '%s ok-to-stop',
+                            'ids': [d.service_instance],
+                        })
+                        if err:
+                            self.log.info('Upgrade: not safe to stop %s.%s' %
+                                          daemon_type, s.service_instance)
+                            time.sleep(10)
+                        else:
+                            self.log.info('Upgrade: safe to stop %s.%s' %
+                                          daemon_type, s.service_instance)
+                            break
+
+                    self.log.info('Upgrade: Redeploying %s.%s' %
+                                  (d.service_type, d.service_instance))
+                    ret, out, err = self.mon_command({
+                        'prefix': 'config set',
+                        'name': 'container_image',
+                        'value': target_name,
+                        'who': daemon_type + '.' + d.service_instance,
+                    })
+                    return self._service_action(d.service_type,
+                                                d.service_instance,
+                                                d.nodename,
+                                                'redeploy')
+
+            if need_upgrade_self:
+                mgr_map = self.get('mgr_map')
+                num = len(mgr_map.get('standbys'))
+                if not num:
+                    self.log.warning(
+                        'Upgrade: No standby mgrs and I need to update the mgr, '
+                        'suspending upgrade')
+                    self.upgrade_state['error'] = 'No standby mgrs and mgr.%s ' \
+                        'needs to be upgraded' % self.get_mgr_id()
+                    return
+
+                self.log.info('Upgrade: there are %d other already-upgraded '
+                              'standby mgrs, failing over' % num)
+
+                # fail over
+                ret, out, err = self.mon_command({
+                    'prefix': 'mgr fail',
+                    'who': self.get_mgr_id(),
+                })
+                return
+
+            # make sure 'ceph versions' agrees
+            ret, out, err = self.mon_command({
+                'prefix': 'versions',
+            })
+            j = json.loads(out)
+            self.log.debug('j %s' % j)
+            for version, count in j.get(daemon_type, {}).items():
+                if version != target_version:
+                    self.log.warning(
+                        'Upgrade: %d %s daemon(s) are %s != target %s' %
+                        (count, daemon_type, version, target_version))
+
+            # push down configs
+            self.log.info('Upgrade: Normalizing container_image for all %s...' %
+                          daemon_type)
+            ret, out, err = self.mon_command({
+                'prefix': 'config set',
+                'name': 'container_image',
+                'value': target_name,
+                'who': daemon_type,
+            })
+            for d in daemons:
+                if d.service_type != daemon_type:
+                    continue
+                ret, image, err = self.mon_command({
+                    'prefix': 'config rm',
+                    'name': 'container_image',
+                    'who': daemon_type + '.' + d.service_instance,
+                })
+            self.log.info('Upgrade: All %s daemons are up to date.' %
+                          daemon_type)
+
+        # clean up
+        self.log.info('Upgrade: Finalizing container_image settings')
+        ret, out, err = self.mon_command({
+            'prefix': 'config set',
+            'name': 'container_image',
+            'value': target_name,
+            'who': 'global',
+        })
+        for daemon_type in ['mgr', 'mon', 'osd', 'rgw', 'mds']:
+            ret, image, err = self.mon_command({
+                'prefix': 'config rm',
+                'name': 'container_image',
+                'who': daemon_type,
+            })
+
+        self.log.info('Upgrade: Complete!')
+        self.upgrade_state = None
+        self._save_upgrade_state()
+
+    def serve(self):
+        self.log.info("serve starting")
+        while self.run:
+            while self.upgrade_state and not self.upgrade_state.get('paused'):
+                self.log.debug('Upgrade in progress, refreshing services')
+                completion = self._get_services()
+                self._orchestrator_wait([completion])
+                orchestrator.raise_if_exception(completion)
+                self.log.debug('services %s' % completion.result)
+                completion = self._do_upgrade(completion.result)
+                if completion:
+                    self._orchestrator_wait([completion])
+                    orchestrator.raise_if_exception(completion)
+                self.log.debug('did _do_upgrade')
+
+            sleep_interval = 60*60  # this really doesn't matter
+            self.log.debug('Sleeping for %d seconds', sleep_interval)
+            ret = self.event.wait(sleep_interval)
+            self.event.clear()
+        self.log.info("serve exit")
 
     def config_notify(self):
         """
@@ -368,6 +531,9 @@ class CephadmOrchestrator(MgrModule, orchestrator.Orchestrator):
 
     def _save_inventory(self):
         self.set_store('inventory', json.dumps(self.inventory))
+
+    def _save_upgrade_state(self):
+        self.set_store('upgrade_state', json.dumps(self.upgrade_state))
 
     def _reconfig_ssh(self):
         temp_files = []  # type: list
@@ -1446,24 +1612,30 @@ class CephadmOrchestrator(MgrModule, orchestrator.Orchestrator):
             host, None, 'pull', [],
             image=image_name,
             no_fsid=True)
-        return out[0]
+        (image_id, ceph_version) = out[0].split(',', 1)
+        self.log.debug('image %s -> id %s version %s' %
+                       (image_name, image_id, ceph_version))
+        return image_id, ceph_version
 
     def upgrade_check(self, image, version):
         if version:
-            target = self.container_image_base + ':v' + version
+            target_name = self.container_image_base + ':v' + version
         elif image:
-            target = image
+            target_name = image
         else:
             raise OrchestratorError('must specify either image or version')
-        return self._get_services().then(lambda daemons: self._upgrade_check(target, daemons))
+        return self._get_services().then(
+            lambda daemons: self._upgrade_check(target_name, daemons))
 
-    def _upgrade_check(self, target, services):
+    def _upgrade_check(self, target_name, services):
         # get service state
-        target_id = self._get_container_image_id(target)
-        self.log.debug('Target image %s id %s' % (target, target_id))
+        target_id, target_version = self._get_container_image_id(target_name)
+        self.log.debug('Target image %s id %s version %s' % (
+            target_name, target_id, target_version))
         r = {
-            'target_image_name': target,
-            'target_image_id': target_id,
+            'target_name': target_name,
+            'target_id': target_id,
+            'target_version': target_version,
             'needs_update': dict(),
             'up_to_date': list(),
         }
@@ -1474,5 +1646,75 @@ class CephadmOrchestrator(MgrModule, orchestrator.Orchestrator):
                 r['needs_update'][s.name()] = {
                     'current_name': s.container_image_name,
                     'current_id': s.container_image_id,
+                    'current_version': s.version,
                 }
         return trivial_result(json.dumps(r, indent=4))
+
+    def upgrade_status(self):
+        r = orchestrator.UpgradeStatusSpec()
+        if self.upgrade_state:
+            r.target_image = self.upgrade_state.get('target_name')
+            r.in_progress = True
+            r.services_complete = ['foo', 'bar']
+            if self.upgrade_state.get('paused'):
+                r.message = 'Upgrade paused'
+        return trivial_result(r)
+
+    def upgrade_start(self, image, version):
+        if version:
+            target_name = self.container_image_base + ':v' + version
+        elif image:
+            target_name = image
+        else:
+            raise OrchestratorError('must specify either image or version')
+        if self.upgrade_state:
+            if self.upgrade_state.get('target_name') != target_name:
+                raise OrchestratorError(
+                    'Upgrade to %s (not %s) already in progress' %
+                (self.upgrade_state.get('target_name'), target_name))
+            if self.upgrade_state.get('paused'):
+                del self.upgrade_state['paused']
+                self._save_upgrade_state()
+                return trivial_result('Resumed upgrade to %s' %
+                                      self.upgrade_state.get('target_name'))
+            return trivial_result('Upgrade to %s in progress' %
+                                  self.upgrade_state.get('target_name'))
+        target_id, target_version = self._get_container_image_id(target_name)
+        self.upgrade_state = {
+            'target_name': target_name,
+            'target_id': target_id,
+            'target_version': target_version,
+        }
+        self._save_upgrade_state()
+        self.event.set()
+        return trivial_result('Initiating upgrade to %s %s' % (image, target_id))
+
+    def upgrade_pause(self):
+        if not self.upgrade_state:
+            raise OrchestratorError('No upgrade in progress')
+        if self.upgrade_state.get('paused'):
+            return trivial_result('Upgrade to %s already paused' %
+                                  self.upgrade_state.get('target_name'))
+        self.upgrade_state['paused'] = True
+        self._save_upgrade_state()
+        return trivial_result('Paused upgrade to %s' %
+                              self.upgrade_state.get('target_name'))
+
+    def upgrade_resume(self):
+        if not self.upgrade_state:
+            raise OrchestratorError('No upgrade in progress')
+        if not self.upgrade_state.get('paused'):
+            return trivial_result('Upgrade to %s not paused' %
+                                  self.upgrade_state.get('target_name'))
+        del self.upgrade_state['paused']
+        self._save_upgrade_state()
+        return trivial_result('Resumed upgrade to %s' %
+                              self.upgrade_state.get('target_name'))
+
+    def upgrade_stop(self):
+        if not self.upgrade_state:
+            return trivial_result('No upgrade in progress')
+        target_name = self.upgrade_state.get('target_name')
+        self.upgrade_state = None
+        self._save_upgrade_state()
+        return trivial_result('Stopped upgrade to %s' % target_name)
