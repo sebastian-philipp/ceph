@@ -27,7 +27,7 @@ from ceph.deployment import inventory, translate
 from ceph.deployment.drive_group import DriveGroupSpec
 from ceph.deployment.drive_selection import selector
 
-from mgr_module import MgrModule
+from mgr_module import MgrModule, PersistentStoreDict
 import mgr_util
 import orchestrator
 from orchestrator import OrchestratorError, HostPlacementSpec, OrchestratorValidationError, HostSpec
@@ -407,8 +407,11 @@ class CephadmOrchestrator(MgrModule, orchestrator.OrchestratorClientMixin):
         self.inventory_cache = orchestrator.OutdatablePersistentDict(
             self, self._STORE_HOST_PREFIX + '.devices')
 
-        self.daemon_cache = orchestrator.OutdatablePersistentDict(
-            self, self._STORE_HOST_PREFIX + '.daemons')
+        #self.daemon_cache = orchestrator.OutdatablePersistentDict(
+        #    self, self._STORE_HOST_PREFIX + '.daemons')
+        to_string = lambda dd: json.dumps(dd.to_json())
+        from_string = lambda s: orchestrator.DaemonDescription.from_json(json.loads(s))
+        self.persistent_daemons = PersistentStoreDict(self, self._STORE_HOST_PREFIX + '.persistent_daemons', to_string, from_string)
 
         # ensure the host lists are in sync
         for h in self.inventory.keys():

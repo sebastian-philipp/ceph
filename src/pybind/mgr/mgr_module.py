@@ -1487,10 +1487,12 @@ class MgrModule(ceph_module.BaseMgrModule, MgrModuleLoggingMixin):
 
 
 class PersistentStoreDict(object):
-    def __init__(self, mgr, prefix):
+    def __init__(self, mgr, prefix, to_string=None, from_string=None):
         # type: (MgrModule, str) -> None
         self.mgr = mgr
         self.prefix = prefix + '.'
+        self.to_string = to_string or json.dumps
+        self.from_string = from_string or json.loads
 
     def _mk_store_key(self, key):
         return self.prefix + key
@@ -1513,7 +1515,7 @@ class PersistentStoreDict(object):
             val = self.mgr.get_store(key)
             if val is None:
                 self.__missing__(key)
-            return json.loads(val)
+            return self.from_string(val)
         except (KeyError, AttributeError, IndexError, ValueError, TypeError):
             logging.getLogger(__name__).exception('failed to deserialize')
             self.mgr.set_store(key, None)
@@ -1525,7 +1527,7 @@ class PersistentStoreDict(object):
         value=None is not allowed, as it will remove the key.
         """
         key = self._mk_store_key(item)
-        self.mgr.set_store(key, json.dumps(value) if value is not None else None)
+        self.mgr.set_store(key, self.to_string(value) if value is not None else None)
 
     def __delitem__(self, item):
         self[item] = None
@@ -1539,7 +1541,7 @@ class PersistentStoreDict(object):
         try:
             for item in six.iteritems(self.mgr.get_store_prefix(self.prefix)):
                 k, v = item
-                yield k[prefix_len:], json.loads(v)
+                yield k[prefix_len:], self.from_string(v)
         except (KeyError, AttributeError, IndexError, ValueError, TypeError):
             logging.getLogger(__name__).exception('failed to deserialize')
             self.clear()
