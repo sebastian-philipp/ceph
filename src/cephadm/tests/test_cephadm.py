@@ -86,7 +86,43 @@ default via 10.3.64.1 dev eno1 proto static metric 100
                 '10.3.64.0/24': ['10.3.64.23', '10.3.64.27'],
                 '10.88.0.0/16': ['10.88.0.1'],
                 '172.21.3.1': ['172.21.3.2'],
-                '192.168.122.0/24': ['192.168.122.1']}
+                '192.168.122.0/24': ['192.168.122.1']
+            }
+        ),
+        (
+"""
+::1 dev lo proto kernel metric 256 pref medium
+fde4:8dba:82e1::/64 dev eth1 proto kernel metric 256 expires 3383sec pref medium
+fe80::/64 dev eth0 proto kernel metric 256 pref medium
+fe80::/64 dev eth1 proto kernel metric 256 pref medium
+default via fe80::5054:ff:fe4f:b9dd dev eth1 proto ra metric 1024 expires 1583sec hoplimit 64 pref medium
+""",
+            {
+                'fde4:8dba:82e1::/64': [????],
+                'fe80::/64': [????],
+            }
+        ),        (
+"""
+2003:fc:b701:1e00::/64 dev enxd89ef3f34260 proto kernel metric 100 pref medium
+2003:fc:b701:e200::/64 dev enxd89ef3f34260 proto ra metric 100 pref medium
+2003:fc:b701:e200::/56 via fe80::e228:6dff:fef3:84dc dev enxd89ef3f34260 proto ra metric 100 pref medium
+2003:fc:b702:5200::/64 dev enxd89ef3f34260 proto kernel metric 100 pref medium
+2620:113:80c0:8100:10:163:0:2 dev tun0 proto kernel metric 50 pref medium
+2620:113:80c0:8100:10:163:0:2 dev tun0 proto kernel metric 256 pref medium
+2620:113:80c0:8100:10:163:1:179 dev tun0 proto kernel metric 50 pref medium
+2620:113:80c0:8000::/50 via 2620:113:80c0:8100:10:163:0:2 dev tun0 proto static metric 50 pref medium
+fd00::/64 dev enxd89ef3f34260 proto kernel metric 100 pref medium
+fe80::/64 dev enxd89ef3f34260 proto kernel metric 100 pref medium
+fe80::/64 dev vethf0a2bb6 proto kernel metric 256 pref medium
+fe80::/64 dev docker0 proto kernel metric 256 pref medium
+fe80::/64 dev enxd89ef3f34260 proto kernel metric 256 pref medium
+default dev tun0 proto static metric 50 pref medium
+default via fe80::e228:6dff:fef3:84dc dev enxd89ef3f34260 proto ra metric 100 pref medium
+""",
+            {
+                'fd00::/64': [????],
+                'fe80::/64': [????],
+            }
         ),
     ])
     def test_parse_ip_route(self, test_input, expected):
