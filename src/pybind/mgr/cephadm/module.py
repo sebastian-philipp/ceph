@@ -1342,6 +1342,7 @@ you may want to run:
         osd_count = 0
         for h, dm in self.cache.get_daemons_with_volatile_status():
             for name, dd in dm.items():
+                self.log.info("name:{}, dd:{}".format(name, dd))
                 if service_type and service_type != dd.daemon_type:
                     continue
                 n: str = dd.service_name()

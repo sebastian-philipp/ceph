@@ -11,7 +11,6 @@ from ..exception import VolumeException
 from ..fs_util import create_pool, remove_pool, create_filesystem, \
     remove_filesystem, create_mds, volume_exists
 from mgr_util import open_filesystem
-
 log = logging.getLogger(__name__)
 
 
@@ -45,7 +44,7 @@ def create_volume(mgr, volname, placement):
     """
     metadata_pool, data_pool = gen_pool_names(volname)
     # create pools
-    r, outs, outb = create_pool(mgr, metadata_pool)
+    r, outb, outs = create_pool(mgr, metadata_pool)
     if r != 0:
         return r, outb, outs
     r, outb, outs = create_pool(mgr, data_pool)
@@ -60,9 +59,7 @@ def create_volume(mgr, volname, placement):
         #cleanup
         remove_pool(mgr, data_pool)
         remove_pool(mgr, metadata_pool)
-        return r, outb, outs
-    # create mds
-    return create_mds(mgr, volname, placement)
+    return r, outb, outs
 
 
 def delete_volume(mgr, volname, metadata_pool, data_pools):
