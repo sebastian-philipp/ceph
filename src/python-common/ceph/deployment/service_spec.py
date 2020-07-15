@@ -535,6 +535,11 @@ class ServiceSpec(object):
     def __repr__(self):
         return "{}({!r})".format(self.__class__.__name__, self.__dict__)
 
+    def __eq__(self, other):
+        return (self.__class__ == other.__class__
+                and
+                self.__dict__ == other.__dict__)
+
     def one_line_str(self):
         return '<{} for service_name={}>'.format(self.__class__.__name__, self.service_name())
 

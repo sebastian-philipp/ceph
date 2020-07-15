@@ -21,7 +21,7 @@ class MDSAutoscaler(orchestrator.OrchestratorClientMixin, MgrModule):
         self.fs_map: Optional[dict] = None
         self.old_notify_type = "NONE"
 
-    def get_service(self, fs_name) -> Optional[List[orchestrator.ServiceDescription]]:
+    def get_service(self, fs_name: str) -> Optional[List[orchestrator.ServiceDescription]]:
         result = None
         try:
             service = "mds.{}".format(fs_name)
@@ -38,7 +38,22 @@ class MDSAutoscaler(orchestrator.OrchestratorClientMixin, MgrModule):
         self.log.info("service info:{}".format(result))
         return result
 
-    def update_daemon_count(self, fs_name, abscount) -> Optional[ServiceSpec]:
+    def get_daemons(self, fs_name: str) -> Optional[List[orchestrator.DaemonDescription]]:
+        result = None
+        try:
+            service = "mds.{}".format(fs_name)
+            completion = self.list_daemons(service_name=service)
+            self._orchestrator_wait([completion])
+            orchestrator.raise_if_exception(completion)
+            result = completion.result
+        except Exception as e:
+            self.log.exception("{}: exception while fetching service info"
+                               .format(e))
+            pass
+        self.log.info("service info:{}".format(result))
+        return result
+
+    def update_daemon_count(self, fs_name: str, abscount: int) -> Optional[ServiceSpec]:
         svclist = self.get_service(fs_name)
         if svclist is None or len(svclist) == 0:
             self.log.warn("Failed to fetch MDS service details for fs '{}'"
@@ -61,7 +76,7 @@ class MDSAutoscaler(orchestrator.OrchestratorClientMixin, MgrModule):
         ps.count = abscount
         return newspec
 
-    def spawn_mds(self, fs_name, count):
+    def spawn_mds(self, fs_name: str, count: int):
         newsvc = self.update_daemon_count(fs_name, count+1)
         if newsvc is None:
             return
@@ -70,7 +85,7 @@ class MDSAutoscaler(orchestrator.OrchestratorClientMixin, MgrModule):
         self._orchestrator_wait([completion])
         orchestrator.raise_if_exception(completion)
 
-    def kill_mds(self, fs_name, count):
+    def kill_mds(self, fs_name: str, count: int):
         newsvc = self.update_daemon_count(fs_name, count-1)
         if newsvc is None:
             return
@@ -79,35 +94,38 @@ class MDSAutoscaler(orchestrator.OrchestratorClientMixin, MgrModule):
         self._orchestrator_wait([completion])
         orchestrator.raise_if_exception(completion)
 
-    def get_required_standby_count(self, fs_name):
+    def get_required_standby_count(self, fs_name: str) -> Optional[int]:
         total = 0
         assert self.fs_map is not None
-        for fs in self.fs_map.get('filesystems'):
+        for fs in self.fs_map['filesystems']:
             if fs['mdsmap']['fs_name'] == fs_name:
                 self.log.info("getting standby_count_wanted")
-                return fs.get('mdsmap').get('standby_count_wanted')
+                return fs['mdsmap'].get('standby_count_wanted')
         # total = max(total, fs.get('mdsmap').get('standby_count_wanted'))
         return total
 
-    def get_current_standby_count(self, fs_name):
+    def get_current_standby_count(self, daemons: List[orchestrator.DaemonDescription], fs_name: str) -> int:
         # standbys are not grouped by filesystems in fs_map
         # available = standby_replay + standby_active
         assert self.fs_map is not None
         total = 0
-        for sb in self.fs_map.get('standbys'):
-            if orchestrator.service_name(sb.name) == 'mds.{}'.format(fs_name):
+        daemon_names = {
+            d.name() for d in daemons
+        }
+        for sb in self.fs_map['standbys']:
+            if sb['name'] in daemon_names:
                 total += 1
         # return len(self.fs_map.get('standbys'))
         return total
 
-    def get_current_active_count(self, fs_name):
+    def get_current_active_count(self, fs_name: str):
         assert self.fs_map is not None
         for fsys in self.fs_map.get('filesystems'):
             if fsys.get('mdsmap').get('fs_name') == fs_name:
                 return len(fsys.get('mdsmap').get('in'))
         return 0
 
-    def get_fs_name(self, index=0):
+    def get_fs_name(self, index: int=0):
         assert self.fs_map is not None
         fs = self.fs_map.get('filesystems')[index]
         self.log.info("fs:{}".format(fs))
@@ -115,14 +133,18 @@ class MDSAutoscaler(orchestrator.OrchestratorClientMixin, MgrModule):
         self.log.info("fs_name:{}".format(fs_name))
         return fs_name
 
-    def verify_and_manage_mds_instance(self, fs_name):
+    def verify_and_manage_mds_instance(self, fs_name: str):
         assert self.fs_map is not None
+
+        daemons = self.get_daemons(fs_name)
         standbys_required = self.get_required_standby_count(fs_name)
-        standbys_current = self.get_current_standby_count(fs_name)
+        standbys_current = self.get_current_standby_count(daemons, fs_name)
         active = self.get_current_active_count(fs_name)
 
         self.log.info("standbys_required:{0}, standbys_current:{1}"
                       .format(standbys_required, standbys_current))
+        if standbys_required is None:
+            return
         total = standbys_current + active
         if standbys_current > standbys_required:
             # remove one mds at a time and wait for updated fs_map
