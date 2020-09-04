@@ -420,9 +420,7 @@ Requires:       lvm2
 Requires:       apparmor-abstractions
 %endif
 Requires:       python%{python3_pkgversion}
-%if 0%{?weak_deps}
-Recommends:     podman
-%endif
+Requires:       podman
 %description -n cephadm
 Utility to bootstrap a Ceph cluster and manage Ceph daemons deployed 
 with systemd and podman.
