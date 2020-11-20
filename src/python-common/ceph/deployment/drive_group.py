@@ -260,6 +260,11 @@ class DriveGroupSpec(ServiceSpec):
 
     @classmethod
     def _drive_group_spec_from_json(cls, json_drive_group: dict) -> dict:
+
+        # Evil kludge to make applying deepsea drive groups work with cephadm
+        if 'encryption' in json_drive_group:
+            json_drive_group['encrypted'] = json_drive_group.pop('encryption')
+    
         for applied_filter in list(json_drive_group.keys()):
             if applied_filter not in cls._supported_features:
                 raise DriveGroupValidationError(
