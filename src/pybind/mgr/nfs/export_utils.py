@@ -403,7 +403,6 @@ class Export:
 
     def to_export_block(self) -> RawBlock:
         result = RawBlock('EXPORT', values={
-            'block_name': 'EXPORT',
             'export_id': self.export_id,
             'path': self.path,
             'pseudo': self.pseudo,
