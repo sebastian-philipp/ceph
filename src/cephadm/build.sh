@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 
-target_fpath=${1:-cephadm}
+set -ex
 
-cp cephadm.py __main__.py
-zip ca.zip __main__.py
-echo '#!/usr/bin/env python3' | cat - ca.zip >cephadm
-chmod +x cephadm
-rm __main__.py ca.zip
-if [ "${target_fpath}" != "cephadm" ]; then
-    mv cephadm ${target_fpath}
+target_fpath="$(pwd)/cephadm"
+if [ -n "$1" ]; then
+    target_fpath="$1"
 fi
+builddir=$(mktemp -d)
+if [ -e "requirements.txt" ]; then
+    python3 -m pip install -r requirements.txt --target ${builddir}
+fi
+# Make sure all newly created source files are added here as well!
+cp cephadm.py ${builddir}/__main__.py
+python3 -m zipapp -p python3 ${builddir} --compress --output $target_fpath
+echo written to ${target_fpath}
+rm -rf ${builddir}
