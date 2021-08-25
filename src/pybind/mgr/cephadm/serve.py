@@ -1282,4 +1282,4 @@ class CephadmServe:
     def _deploy_cephadm_binary(self, host: str, addr: Optional[str] = None) -> None:
         # Use tee (from coreutils) to create a copy of cephadm on the target machine
         self.log.info(f"Deploying cephadm binary to {host}")
-        self.mgr.ssh.write_remote_file(host, self.mgr.cephadm_binary_path, self.mgr._cephadm.encode('utf-8'), addr=addr)
+        self.mgr.ssh.write_remote_file(host, self.mgr.cephadm_binary_path, self.mgr._cephadm, addr=addr)
